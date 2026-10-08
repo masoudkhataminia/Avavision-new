@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+/Packages/
+*.resolved.lock
+
+# Xcode
+DerivedData/
+build/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+/App/AvaVision.xcodeproj/
+
+# Model weights are never committed; they are delivered with a signed manifest.
+*.mlmodel
+*.mlpackage/
+*.mlmodelc/
+*.pt
+*.onnx
+
+# Pharmacy data never enters Git (patient privacy).
+data/**
+!data/README.md
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.mobileprovision
