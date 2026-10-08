@@ -71,8 +71,8 @@ final class FrameAnalyzerTests: XCTestCase {
   }
 }
 
-@MainActor
 final class AppModelTests: XCTestCase {
+  @MainActor
   func testCatalogProfilesAndLayoutsPersist() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -100,6 +100,7 @@ final class AppModelTests: XCTestCase {
     XCTAssertTrue(reloaded.isMedicationInUse("metformin-500"))
   }
 
+  @MainActor
   func testWithoutModelTheEngineEvaluatesNothing() throws {
     let app = AppModel(storage: nil)
     let profile = PackProfile.empty(reference: "PACK-1", layout: .weekly7x4)
