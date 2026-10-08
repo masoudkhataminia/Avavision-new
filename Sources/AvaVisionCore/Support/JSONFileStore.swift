@@ -2,7 +2,7 @@ import Foundation
 
 /// Stores one Codable value as a JSON file, written atomically.
 public actor JSONFileStore<Value: Codable & Sendable> {
-  public let fileURL: URL
+  public nonisolated let fileURL: URL
 
   public init(fileURL: URL) {
     self.fileURL = fileURL

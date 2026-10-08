@@ -135,6 +135,15 @@ public struct Quad: Codable, Hashable, Sendable {
     }
   }
 
+  /// Relabels the corners for a pack lying rotated in the image. One quarter turn means the pack's
+  /// top edge runs along the image's left edge (pack top-left = image bottom-left).
+  public func rotated(quarterTurns: Int) -> Quad {
+    let turns = ((quarterTurns % 4) + 4) % 4
+    var c = corners
+    for _ in 0..<turns { c = [c[3], c[0], c[1], c[2]] }
+    return Quad(topLeft: c[0], topRight: c[1], bottomRight: c[2], bottomLeft: c[3])
+  }
+
   /// Axis-aligned bounding box.
   public var boundingBox: Rect2D {
     let xs = corners.map(\.x)

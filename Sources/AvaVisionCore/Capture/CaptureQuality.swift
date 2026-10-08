@@ -6,6 +6,8 @@ public enum CaptureIssue: String, Codable, Hashable, Sendable, CaseIterable {
   case tooDark
   case tooBright
   case glare
+  /// The image could not be analysed at all (for example the model failed to run).
+  case analysisFailed
 }
 
 /// Raw measurements behind a capture-quality decision, kept for audit and calibration.

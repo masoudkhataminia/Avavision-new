@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core-linux:
+    name: Core tests (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint (swift-format)
+        run: swift format lint --strict --recursive Package.swift Sources Tests App
+      - name: Test
+        run: swift test --parallel
+
+  ios:
+    name: iOS app (build + tests)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest stable Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
+          echo "Selecting $xcode"
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+      - name: Core tests on macOS
+        run: swift test
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build and test the app
+        run: scripts/ios-test.sh

@@ -41,6 +41,18 @@ final class GeometryAndLayoutTests: XCTestCase {
     XCTAssertFalse(bowtie.isConvex)
   }
 
+  func testQuadRotationRelabelsCorners() {
+    let quad = Fixtures.quad
+    let turned = quad.rotated(quarterTurns: 1)
+    XCTAssertEqual(turned.topLeft, quad.bottomLeft)
+    XCTAssertEqual(turned.topRight, quad.topLeft)
+    XCTAssertEqual(turned.bottomRight, quad.topRight)
+    XCTAssertEqual(turned.bottomLeft, quad.bottomRight)
+    XCTAssertEqual(quad.rotated(quarterTurns: 4), quad)
+    XCTAssertEqual(quad.rotated(quarterTurns: -1), quad.rotated(quarterTurns: 3))
+    XCTAssertEqual(quad.rotated(quarterTurns: 2).topLeft, quad.bottomRight)
+  }
+
   func testWeeklyLayoutIsValidButUncalibrated() {
     let layout = PackLayout.weekly7x4
     XCTAssertEqual(layout.validationErrors(), [])

@@ -117,7 +117,7 @@ public struct AuditChain: Sendable {
 
 /// Persists the audit chain as JSON Lines (one `AuditEntry` per line), appending only.
 public actor AuditLogStore {
-  public let fileURL: URL
+  public nonisolated let fileURL: URL
   private var cached: AuditChain?
 
   public init(fileURL: URL) {
