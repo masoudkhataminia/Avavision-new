@@ -8,6 +8,7 @@ propagated to the other frames → decision engine) → optional ``review`` / ``
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import uuid
@@ -35,6 +36,7 @@ from ..core.gate import (
 )
 from ..core.models import WEEKLY_7X4, Catalog, CompartmentIndex, ExpectedItem, PackLayout, PackProfile
 from ..core.observation import pill_compartments
+from ..core.physical import PhysicalFeatures, PhysicalRange
 from ..core.session import CheckSession, Phase
 from ..core.signoff import SignOff
 from ..expert.charts import MedicationChart, ProfileDraft, chart_to_profile
@@ -42,6 +44,7 @@ from ..expert.claude import ClaudeExpert, ExpertCall, ExpertError, ExpertSetting
 from ..expert.describe import describe_finding, describe_pack_finding
 from ..storage.database import Database
 from ..vision.camera import CameraSettings, CameraSource, FrameSource, LiveFeed
+from ..vision.codes import read_codes
 from ..vision.detector import OnnxDetector
 from ..vision.embedder import ClassicEmbedder, OnnxEmbedder
 from ..vision.pack_finder import FinderMode
@@ -50,6 +53,8 @@ from ..vision.runtime import available_providers, file_sha256
 from ..vision.segmentation import rectify
 from .credentials import load_api_key
 from .demo import DemoCamera, DemoFault, demo_catalog, demo_profile
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 
 
 class StationError(RuntimeError):
@@ -81,6 +86,7 @@ class LiveStatus:
     quad: list[tuple[float, float]] | None
     sharpness: float | None
     locate_ms: float
+    codes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -203,6 +209,8 @@ class Station:
         self.live: LiveStatus | None = None
         self.check: ActiveCheck | None = None
         self.audit_defect = db.verify_audit()
+        self.references = db.images / "references"
+        self.references.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._running = False
         self._live_thread: threading.Thread | None = None
@@ -223,6 +231,10 @@ class Station:
                 db.save_catalog(demo_catalog())
                 db.save_profile(demo_profile(demo_camera.station))
             settings.layout_id = layout.id
+            # The demo pack waits on the tray with its header card, as a pharmacist would place it.
+            carded = next((p for p in db.profiles() if p.barcode), None)
+            if carded is not None:
+                demo_camera.show(carded)
             source: FrameSource = demo_camera
         else:
             try:
@@ -276,6 +288,8 @@ class Station:
 
     def _live_loop(self) -> None:
         last = None
+        codes: list[str] = []
+        last_codes = 0.0
         while self._running:
             latest = self.feed.latest()
             if latest is None or latest[1] == last:
@@ -286,7 +300,10 @@ class Station:
             observation = self.analyzer.locate(latest[0]).observation
             registration = observation.registration.registration
             metrics = observation.quality.metrics
+            if time.time() - last_codes >= 0.5:
+                codes, last_codes = read_codes(latest[0]), time.time()
             self.live = LiveStatus(
+                codes=codes,
                 at=latest[1],
                 usable=observation.is_usable,
                 quality_issues=[i.value for i in observation.quality.issues],
@@ -476,6 +493,7 @@ class Station:
                     self.brain.classifier(),
                     self.model,
                     self.policy.minimum_detection_confidence,
+                    self.brain.physical_ranges(),
                 )
                 for other in usable[1:]:
                     propagate_identities(evidence, other, self.layout)
@@ -483,6 +501,7 @@ class Station:
             for frame in frames:
                 check.session.record(frame.observation)
             check.session.analyze(self._engine())
+            check.session.see_card(read_codes(images[0]))
             check.frames, check.evidence = frames, evidence
             check.timings = {
                 "grab_ms": round((grabbed - started) * 1000, 1),
@@ -534,6 +553,7 @@ class Station:
                     embedder_id=self.embedder.id,
                     identity=p.identity,
                     crop_file=f"{uuid.uuid4()}.jpg",
+                    features=p.features,
                 )
                 for p in pills
             ]
@@ -653,7 +673,12 @@ class Station:
                 name = f"{uuid.uuid4()}.jpg"
                 cv2.imwrite(str(self.db.crops / name), pill.crop)
                 vectors.append((pill.vector, name))
-            summary = self.brain.teach(medication_id, vectors, group_id=f"teach-{uuid.uuid4()}")
+            summary = self.brain.teach(
+                medication_id,
+                vectors,
+                group_id=f"teach-{uuid.uuid4()}",
+                measurements=[p.features for p in frame.pills if p.features],
+            )
             self.db.save_brain(self.brain)
             self.db.prune_crops(self.db.referenced_crops(self.brain))
             return {"pills": len(frame.pills), "learning": _learning(summary)}
@@ -681,6 +706,51 @@ class Station:
             report = self.brain.recalibrate()
             self.db.save_brain(self.brain)
             return report.model_dump(mode="json")
+
+    def pill_jpeg(self, detection_index: int) -> bytes:
+        check = self.check
+        pill = next(
+            (
+                p
+                for p in (check.evidence.pills if check and check.evidence else [])
+                if p.detection_index == detection_index
+            ),
+            None,
+        )
+        if pill is None:
+            raise StationError("no such pill")
+        return cv2.imencode(".jpg", pill.crop, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes()
+
+    def reference_path(self, medication_id: str) -> Path | None:
+        """The pharmacist-approved reference photo of a medication: one set by hand, otherwise the most typical
+        pill in the brain's memory (every pill there was confirmed by a pharmacist)."""
+        if not _SAFE_ID.match(medication_id):
+            return None
+        chosen = self.references / f"{medication_id}.jpg"
+        if chosen.is_file():
+            return chosen
+        exemplars = [
+            e
+            for e in self.brain.knowledge.exemplars_for(medication_id)
+            if e.crop_file and (self.db.crops / e.crop_file).is_file()
+        ]
+        if not exemplars:
+            return None
+        centre = np.mean([e.vector for e in exemplars], axis=0)
+        typical = max(exemplars, key=lambda e: float(np.dot(e.vector, centre)))
+        return self.db.crops / typical.crop_file
+
+    def set_reference(self, medication_id: str, data: bytes | None) -> None:
+        if not _SAFE_ID.match(medication_id) or medication_id not in self.catalog():
+            raise StationError(f"unknown medication {medication_id}")
+        path = self.references / f"{medication_id}.jpg"
+        if data is None:
+            path.unlink(missing_ok=True)
+            return
+        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise StationError("the file is not an image")
+        cv2.imwrite(str(path), image, [cv2.IMWRITE_JPEG_QUALITY, 92])
 
     def brain_view(self) -> dict:
         catalog = self.catalog()
@@ -748,7 +818,12 @@ class Station:
         view: dict = {
             "session_id": str(session.id),
             "phase": session.phase.value,
-            "profile": {"id": str(check.profile.id), "reference": check.profile.reference},
+            "profile": {
+                "id": str(check.profile.id),
+                "reference": check.profile.reference,
+                "barcode": check.profile.barcode,
+            },
+            "card_codes": session.card_codes,
             "layout": self.layout.model_dump(mode="json"),
             "timings": check.timings,
             "evidence": check.evidence is not None,
@@ -767,6 +842,21 @@ class Station:
         requiring = set(result.compartments_requiring_review)
         opinions = {o.compartment: o for o in session.advisories}
         compartments = []
+        ranges = self.brain.physical_ranges()
+        references = {m.id for m in catalog.medications if self.reference_path(m.id) is not None}
+        pills_by_compartment: dict[CompartmentIndex, list[dict]] = {}
+        for pill in check.evidence.pills if check.evidence else []:
+            detection = check.evidence.observation.detections[pill.detection_index]
+            named = pill.identity.decision.named
+            physical = detection.physical
+            pills_by_compartment.setdefault(pill.compartment, []).append(
+                {
+                    "index": pill.detection_index,
+                    "size": _size(pill.features),
+                    "identity": (m.display_name if (m := catalog.get(named)) else named) if named else None,
+                    "fits": list(physical.consistent_with) if physical and physical.known else None,
+                }
+            )
         for verdict in result.compartments:
             expectation = check.profile.expectation(verdict.compartment)
             opinion = opinions.get(verdict.compartment)
@@ -782,9 +872,12 @@ class Station:
                             "id": i.medication_id,
                             "name": (m.display_name if (m := catalog.get(i.medication_id)) else i.medication_id),
                             "quantity": i.quantity,
+                            "reference": i.medication_id in references,
+                            "range": _range_text(ranges.get(i.medication_id)),
                         }
                         for i in (expectation.items if expectation else [])
                     ],
+                    "pills": pills_by_compartment.get(verdict.compartment, []),
                     "expected_count": verdict.expected_count,
                     "observed_count": verdict.observed_count,
                     "spot_check": verdict.compartment in spot,
@@ -829,6 +922,23 @@ class Station:
                 }
             )
         return items
+
+
+def _size(features: PhysicalFeatures | None) -> str | None:
+    if features is None:
+        return None
+    if abs(features.length_mm - features.width_mm) < 0.3:
+        return f"{features.length_mm:.1f} mm round"
+    return f"{features.length_mm:.1f} × {features.width_mm:.1f} mm"
+
+
+def _range_text(r: PhysicalRange | None) -> str | None:
+    if r is None:
+        return None
+    return (
+        f"{r.length_mm[0]:.1f}–{r.length_mm[1]:.1f} × {r.width_mm[0]:.1f}–{r.width_mm[1]:.1f} mm "
+        f"({r.samples} pills, {r.groups} packs)"
+    )
 
 
 def _learning(summary: LearningSummary) -> dict:

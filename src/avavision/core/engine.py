@@ -28,6 +28,7 @@ from .observation import (
     RegistrationIssue,
     assign,
 )
+from .physical import fits_none
 
 # --------------------------------------------------------------------------- verdicts
 
@@ -58,6 +59,7 @@ class FindingKind(StrEnum):
     UNRECOGNISED_PILL = "unrecognisedPill"
     CONFLICTING_IDENTITY = "conflictingIdentity"
     ADVISOR_DISAGREES = "advisorDisagrees"  # an advisory second opinion saw something else; see core.advisory
+    PHYSICAL_MISMATCH = "physicalMismatch"  # size or colour fits none of the expected medications; core.physical
     NO_EXPECTATION = "noExpectation"
     LAYOUT_UNCALIBRATED = "layoutUncalibrated"
     NOT_EVALUATED = "notEvaluated"
@@ -131,6 +133,7 @@ class PackFindingKind(StrEnum):
     OBJECTS_OUTSIDE_COMPARTMENTS = "objectsOutsideCompartments"
     MODEL_UNAVAILABLE = "modelUnavailable"
     PROFILE_LAYOUT_MISMATCH = "profileLayoutMismatch"
+    PACK_CARD_MISMATCH = "packCardMismatch"  # the camera saw another pack's header card; core.card
 
 
 class PackFinding(BaseModel):
@@ -142,6 +145,7 @@ class PackFinding(BaseModel):
     count: int | None = None
     capture_issues: tuple[CaptureIssue, ...] = ()
     registration_issues: tuple[RegistrationIssue, ...] = ()
+    codes: tuple[str, ...] = ()
 
 
 class VerificationResult(BaseModel):
@@ -330,20 +334,24 @@ class VerificationEngine:
         expected = {k: v for k, v in (expectation.quantities if expectation else {}).items() if v > 0}
         findings: list[Finding] = []
         tallies: list[_Tally] = []
-        low = border = conflicts = unrecognised = 0
+        low = border = conflicts = unrecognised = physical = 0
         suspected: set[MedicationID] = set()
         notices_strangers = (
             bool(expected) and self.brain is not None and all(m in self.brain.well_known_medications for m in expected)
         )
         for a in assignments:
             tally = _Tally()
-            low_here = conflicts_here = unrecognised_here = 0
+            low_here = conflicts_here = unrecognised_here = physical_here = 0
             for obj in a.inside.get(index, []):
                 if obj.confidence < self.policy.minimum_detection_confidence:
                     low_here += 1
                     continue
                 meaning, conflict = self._resolved(obj)
                 conflicts_here += conflict
+                if meaning.kind in (MeaningKind.PILL, MeaningKind.MEDICATION) and fits_none(
+                    obj.physical, set(expected)
+                ):
+                    physical_here += 1
                 if meaning.kind == MeaningKind.PILL:
                     tally.generic += 1
                     decision = obj.identity.decision if obj.identity else None
@@ -362,6 +370,7 @@ class VerificationEngine:
             border = max(border, len(a.ambiguous.get(index, [])))
             conflicts = max(conflicts, conflicts_here)
             unrecognised = max(unrecognised, unrecognised_here)
+            physical = max(physical, physical_here)
 
         if low:
             findings.append(finding(FindingKind.LOW_CONFIDENCE_OBJECT, count=low))
@@ -374,6 +383,8 @@ class VerificationEngine:
         findings += [finding(FindingKind.SUSPECTED_MEDICATION, medication_id=m) for m in sorted(suspected)]
         if unrecognised:
             findings.append(finding(FindingKind.UNRECOGNISED_PILL, count=unrecognised))
+        if physical:
+            findings.append(finding(FindingKind.PHYSICAL_MISMATCH, count=physical))
 
         consensus = tallies[0] if tallies else None
         if consensus is None or any(t != consensus for t in tallies):

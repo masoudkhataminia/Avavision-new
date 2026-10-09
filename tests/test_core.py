@@ -390,3 +390,20 @@ def test_json_round_trip_of_result():
 
     assert VerificationResult.model_validate_json(result.model_dump_json()) == result
     assert not math.isnan(result.usable_frame_count)
+
+
+def test_header_card_of_another_pack_escalates_and_an_unseen_card_changes_nothing():
+    from avavision.core.card import check_card
+    from avavision.core.engine import PackFindingKind, PackStatus
+
+    p = profile(ONE).model_copy(update={"barcode": "WP-1"})
+    result = engine().evaluate(p, frames(full_pack()))
+    assert result.status == PackStatus.COUNT_MATCHED
+    assert check_card(result, p, []) == result
+    assert check_card(result, p, ["WP-1"]) == result
+    assert check_card(result, p.model_copy(update={"barcode": None}), ["WP-2"]) == result
+    wrong = check_card(result, p, ["WP-2"])
+    assert (
+        wrong.status == PackStatus.NEEDS_REVIEW and wrong.pack_findings[-1].kind == PackFindingKind.PACK_CARD_MISMATCH
+    )
+    assert check_card(wrong, p, ["WP-2"]) == wrong

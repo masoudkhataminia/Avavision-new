@@ -34,6 +34,15 @@ export function CatalogPage() {
       reload();
     });
 
+  const [version, setVersion] = useState(0);
+  const setReference = (m: Medication, file: File | null) =>
+    run("reference", async () => {
+      const path = `/api/medications/${encodeURIComponent(m.id)}/reference`;
+      await (file ? api.upload(path, file, "PUT") : api.put(path, undefined));
+      setVersion(Date.now());
+      reload();
+    });
+
   const appearance = (field: "colour" | "shape" | "imprint", value: string) =>
     editing && setEditing({ ...editing, appearance: { ...editing.appearance, [field]: value || null } });
 
@@ -57,6 +66,7 @@ export function CatalogPage() {
           <thead>
             <tr>
               <th>Medication</th>
+              <th>Reference</th>
               <th>Appearance</th>
               <th />
             </tr>
@@ -67,6 +77,15 @@ export function CatalogPage() {
                 <td>
                   {m.name} {m.strength}
                   <div className="small muted">{m.id}</div>
+                </td>
+                <td>
+                  {catalog.references?.includes(m.id) && (
+                    <img
+                      className="thumb"
+                      src={`/api/medications/${encodeURIComponent(m.id)}/reference.jpg?v=${version}`}
+                      alt=""
+                    />
+                  )}
                 </td>
                 <td className="small">
                   {[m.appearance.colour, m.appearance.shape, m.appearance.imprint].filter(Boolean).join(", ")}
@@ -113,6 +132,16 @@ export function CatalogPage() {
             <input value={editing.appearance.imprint ?? ""} onChange={(e) => appearance("imprint", e.target.value)} />
           </label>
           {isNew && <div className="small muted">Id: {slug(editing.name, editing.strength) || "—"}</div>}
+          {!isNew && (
+            <label>
+              Reference photo (a pill you have checked; otherwise the brain's most typical confirmed pill is shown)
+              <input
+                type="file"
+                accept=".jpg,.jpeg,.png"
+                onChange={(e) => e.target.files?.[0] && setReference(editing, e.target.files[0])}
+              />
+            </label>
+          )}
           <div className="row">
             <button className="primary" disabled={!editing.name.trim() || busy !== null} onClick={save}>
               Save

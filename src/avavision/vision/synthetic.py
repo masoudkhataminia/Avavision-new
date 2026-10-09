@@ -12,6 +12,7 @@ import numpy as np
 
 from ..core.geometry import Rect
 from ..core.models import CompartmentIndex, PackLayout, cell
+from .codes import code_image
 from .pack_finder import MARKER_DICTIONARY, MARKER_IDS
 
 #: Colour (BGR), axes (px at 1920 wide) and shape of a few fictional medications.
@@ -31,6 +32,8 @@ class Scene:
 
     contents: dict[CompartmentIndex, list[str]] = field(default_factory=dict)
     foreign: list[CompartmentIndex] = field(default_factory=list)
+    #: Text of the QR code on the pack's header card, shown beside the tray.
+    card: str | None = None
 
 
 @dataclass
@@ -94,6 +97,13 @@ class Station:
             rect = layout.cell_rect(index)
             p = (int(x0 + rect.center.x * fw), int(y0 + (rect.y + 0.3 * rect.height) * fh))
             cv2.line(image, p, (p[0] + 25, p[1] + 8), (40, 40, 160), 3)
+        if scene.card:
+            code = code_image(scene.card, scale=5)
+            top, left = 400, 40
+            cv2.rectangle(
+                image, (left - 20, top - 20), (left + code.shape[1] + 20, top + code.shape[0] + 50), (250,) * 3, -1
+            )
+            image[top : top + code.shape[0], left : left + code.shape[1]] = code[..., None]
         # Tray markers.
         dictionary = cv2.aruco.getPredefinedDictionary(MARKER_DICTIONARY)
         centres = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]

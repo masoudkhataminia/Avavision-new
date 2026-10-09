@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import re
 from contextlib import asynccontextmanager
 from importlib import resources
@@ -197,7 +199,9 @@ def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | 
 
     @app.get("/api/catalog")
     def catalog():
-        return station.catalog().model_dump(mode="json")
+        data = station.catalog().model_dump(mode="json")
+        data["references"] = [m["id"] for m in data["medications"] if station.reference_path(m["id"]) is not None]
+        return data
 
     @app.put("/api/catalog/medications/{medication_id}")
     def put_medication(medication_id: str, medication: Medication):
@@ -231,6 +235,7 @@ def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | 
             {
                 "id": str(p.id),
                 "reference": p.reference,
+                "barcode": p.barcode,
                 "layout_id": p.layout_id,
                 "doses": p.total_doses,
                 "created_at": p.created_at.isoformat(),
@@ -309,6 +314,23 @@ def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | 
     def sign_off(request: SignOff):
         return station.sign_off(request)
 
+    @app.get("/api/check/pills/{index}.jpg")
+    def pill_image(index: int):
+        return Response(station.pill_jpeg(index), media_type="image/jpeg")
+
+    @app.get("/api/medications/{medication_id}/reference.jpg")
+    def reference_image(medication_id: str):
+        path = station.reference_path(medication_id)
+        if path is None:
+            raise HTTPException(404, "no reference image")
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @app.put("/api/medications/{medication_id}/reference")
+    async def put_reference(medication_id: str, request: Request):
+        data = await request.body()
+        await asyncio.to_thread(station.set_reference, medication_id, data or None)
+        return {"medication_id": medication_id, "custom": bool(data)}
+
     @app.get("/api/check/evidence.jpg")
     def evidence():
         return Response(station.evidence_jpeg(), media_type="image/jpeg")
@@ -384,6 +406,59 @@ def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | 
             "total": station.db.audit_count(),
             "entries": [summary(e) for e in station.db.audit_page(min(limit, 500), before)],
         }
+
+    @app.get("/api/audit/export.csv")
+    def export_records(since: str | None = None, until: str | None = None):
+        """Checking records for QCPP and pharmacy audits: one row per signed-off pack."""
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "entry",
+                "signed_at",
+                "pack_reference",
+                "header_card",
+                "station",
+                "result",
+                "decision",
+                "pharmacist",
+                "compartments_inspected",
+                "compartments_flagged",
+                "pack_findings",
+                "spot_checks",
+                "evidence_photo",
+                "record_hash",
+            ]
+        )
+        for entry in station.db.audit_entries():
+            record = CheckRecord.model_validate_json(entry.payload)
+            signed = record.sign_off.signed_at.isoformat()
+            if (since and signed < since) or (until and signed > until):
+                continue
+            flagged = [v for v in record.result.compartments if v.status.value in ("needsReview", "mismatch")]
+            writer.writerow(
+                [
+                    entry.sequence,
+                    signed,
+                    record.profile.reference,
+                    record.profile.barcode or "",
+                    record.station_id,
+                    record.result.status.value,
+                    record.sign_off.decision.value,
+                    record.sign_off.pharmacist,
+                    len(record.sign_off.reviews),
+                    len(flagged),
+                    "; ".join(f.kind.value for f in record.result.pack_findings),
+                    len(record.result.spot_checks),
+                    "; ".join(record.evidence_images),
+                    entry.hash,
+                ]
+            )
+        return Response(
+            buffer.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="avavision-checking-records.csv"'},
+        )
 
     @app.get("/api/audit/{sequence}")
     def audit_entry(sequence: int):

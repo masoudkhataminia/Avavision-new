@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useData } from "../hooks";
 import type { Live } from "../types";
 
@@ -16,8 +17,12 @@ const ISSUE_TEXT: Record<string, string> = {
   aspectRatioMismatch: "Pack shape does not match the layout",
 };
 
-export function LiveView() {
+export function LiveView({ onCodes }: { onCodes?: (codes: string[]) => void } = {}) {
   const { data: live } = useData<Live>("/api/live", 200);
+  const codes = live?.codes?.join("|") ?? "";
+  useEffect(() => {
+    if (onCodes) onCodes(codes ? codes.split("|") : []);
+  }, [codes, onCodes]);
   const issues = live ? [...live.quality_issues, ...live.registration_issues] : [];
   const points = live?.quad?.map(([x, y]) => `${x * 100},${y * 100}`).join(" ");
 
@@ -47,6 +52,11 @@ export function LiveView() {
               {ISSUE_TEXT[issue] ?? issue}
             </span>
           ))}
+        {live?.codes?.map((c) => (
+          <span key={c} className="banner status-countMatched small">
+            Card {c}
+          </span>
+        ))}
         {live && <span className="muted">{live.locate_ms} ms</span>}
       </div>
     </div>

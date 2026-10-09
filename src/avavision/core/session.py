@@ -8,6 +8,7 @@ from enum import StrEnum
 from ..brain.brain import BrainSummary
 from .advisory import AdvisoryOpinion, apply_advisories
 from .audit import CheckRecord, ModelSummary
+from .card import check_card
 from .engine import VerificationEngine, VerificationResult
 from .models import Catalog, PackLayout, PackProfile
 from .observation import FrameObservation
@@ -41,6 +42,7 @@ class CheckSession:
         self.frames: list[FrameObservation] = []
         self.result: VerificationResult | None = None
         self.advisories: list[AdvisoryOpinion] = []
+        self.card_codes: list[str] = []
         self.sign_off: SignOff | None = None
 
     @property
@@ -71,12 +73,21 @@ class CheckSession:
         self.result = apply_advisories(self.result, opinions)
         return self.result
 
+    def see_card(self, codes: list[str]) -> VerificationResult:
+        """Records the header-card codes seen in the analysed frames; another pack's card escalates the result."""
+        if self.phase != Phase.ANALYZED or self.result is None:
+            raise SessionError(f"cannot read the card in phase {self.phase}")
+        self.card_codes = sorted(set(self.card_codes) | set(codes))
+        self.result = check_card(self.result, self.profile, self.card_codes)
+        return self.result
+
     def retake(self) -> None:
         if self.phase != Phase.ANALYZED:
             raise SessionError(f"cannot retake in phase {self.phase}")
         self.frames.clear()
         self.result = None
         self.advisories = []
+        self.card_codes = []
         self.phase = Phase.CAPTURING
 
     def complete(
@@ -105,4 +116,5 @@ class CheckSession:
             frame_image_sha256s=[f.image_sha256 for f in self.frames if f.image_sha256],
             evidence_images=evidence_images or [],
             advisories=self.advisories,
+            card_codes=self.card_codes,
         )

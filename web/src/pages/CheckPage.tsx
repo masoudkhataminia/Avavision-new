@@ -14,7 +14,7 @@ const PACK_STATUS: Record<string, string> = {
   retakeRequired: "Retake required",
 };
 
-const FAULTS = ["none", "missing", "extra", "swapped", "foreign", "emptyTray"];
+const FAULTS = ["none", "missing", "extra", "swapped", "foreign", "emptyTray", "wrongCard"];
 
 function storedInitials(): string {
   try {
@@ -147,6 +147,24 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
       update(await api.post<CheckView>("/api/check/sign-off", body));
     });
 
+  // A header card in view opens its profile and starts the check (once per card).
+  const [lastCard, setLastCard] = useState<string | null>(null);
+  const onCodes = useCallback(
+    (codes: string[]) => {
+      if (busy || (check && check.phase !== "completed")) return;
+      const match = profiles?.find((p) => p.barcode && codes.includes(p.barcode) && p.barcode !== lastCard);
+      if (!match) return;
+      setLastCard(match.barcode);
+      setProfileId(match.id);
+      run("start", async () => {
+        resetReview();
+        setFault("none");
+        update(await api.post<CheckView>("/api/check/start", { profile_id: match.id }));
+      });
+    },
+    [busy, check, profiles, lastCard, run, update],
+  );
+
   const starter = (
     <div className="panel row">
       <label>
@@ -163,6 +181,7 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
         Start check
       </button>
       {!profiles?.length && <span className="muted">Create a profile first (Profiles).</span>}
+      <span className="muted small">or show the pack's header card to the camera</span>
     </div>
   );
 
@@ -171,6 +190,12 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
       {error && <div className="error">{error}</div>}
 
       {(!check || check.phase === "completed") && starter}
+      {(!check || check.phase === "completed") && (
+        <div className="split">
+          <LiveView onCodes={onCodes} />
+          <div />
+        </div>
+      )}
 
       {check?.phase === "completed" && (
         <div className="panel stack">
@@ -189,9 +214,10 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
 
       {check?.phase === "capturing" && (
         <div className="split">
-          <LiveView />
+          <LiveView onCodes={onCodes} />
           <div className="panel stack">
             <h2>Checking {check.profile.reference}</h2>
+            {check.profile.barcode && <div className="small muted">Header card: {check.profile.barcode}</div>}
             <p className="muted">
               Place the pack on the tray with all four markers visible, then capture (<kbd>Space</kbd>).
             </p>
@@ -236,6 +262,9 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
             <div className={`banner status-${result.status}`}>
               {check.profile.reference}: {PACK_STATUS[result.status] ?? result.status}
             </div>
+            {check.profile.barcode && check.card_codes.includes(check.profile.barcode) && (
+              <div className="notice small">Header card {check.profile.barcode} matches this profile</div>
+            )}
             {result.pack_findings.map((f) => (
               <div key={f} className="error">
                 {f}
@@ -258,6 +287,42 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
                     ? current.expected.map((e) => `${e.quantity} × ${e.name}`).join(", ")
                     : "empty"}{" "}
                   · seen: {current.observed_count ?? "uncertain"}
+                </div>
+                <div className="compare">
+                  <div>
+                    <div className="small muted">Seen in this compartment</div>
+                    <div className="crops">
+                      {current.pills.map((p) => (
+                        <figure key={p.index}>
+                          <img src={`/api/check/pills/${p.index}.jpg?r=${result.id}`} alt="tablet" />
+                          <figcaption className="small">
+                            {p.size ?? "size unknown"}
+                            {p.identity && <div>looks like {p.identity}</div>}
+                            {p.fits && p.fits.length === 0 && <div className="status-needsReview">fits no known size/colour</div>}
+                          </figcaption>
+                        </figure>
+                      ))}
+                      {current.pills.length === 0 && <span className="small muted">no confidently counted tablet</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="small muted">Expected (pharmacist-confirmed references)</div>
+                    <div className="crops">
+                      {current.expected.map((e) => (
+                        <figure key={e.id}>
+                          {e.reference ? (
+                            <img src={`/api/medications/${encodeURIComponent(e.id)}/reference.jpg`} alt={e.name} />
+                          ) : (
+                            <div className="no-reference small muted">no reference yet</div>
+                          )}
+                          <figcaption className="small">
+                            {e.quantity} × {e.name}
+                            {e.range && <div className="muted">{e.range}</div>}
+                          </figcaption>
+                        </figure>
+                      ))}
+                    </div>
+                  </div>
                 </div>
                 {current.findings.length > 0 && (
                   <ul className="small">

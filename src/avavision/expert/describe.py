@@ -39,6 +39,7 @@ def describe_finding(f: Finding, catalog: Catalog) -> str:
         FindingKind.UNRECOGNISED_PILL: "a tablet the brain does not recognise",
         FindingKind.CONFLICTING_IDENTITY: "the photos disagree about which medication this is",
         FindingKind.ADVISOR_DISAGREES: "the second opinion saw something different",
+        FindingKind.PHYSICAL_MISMATCH: "a tablet whose size or colour matches none of the expected medications",
         FindingKind.NO_EXPECTATION: "the profile does not say what belongs here",
         FindingKind.LAYOUT_UNCALIBRATED: "the pack layout is not calibrated",
         FindingKind.NOT_EVALUATED: "not evaluated",
@@ -58,6 +59,7 @@ def describe_pack_finding(f: PackFinding) -> str:
         PackFindingKind.OBJECTS_OUTSIDE_COMPARTMENTS: f"{f.count} object(s) outside the compartments",
         PackFindingKind.MODEL_UNAVAILABLE: "no detection model is available",
         PackFindingKind.PROFILE_LAYOUT_MISMATCH: "the profile belongs to a different pack layout",
+        PackFindingKind.PACK_CARD_MISMATCH: "the header card in view is not this profile's card: " + ", ".join(f.codes),
     }
     return texts[f.kind]
 

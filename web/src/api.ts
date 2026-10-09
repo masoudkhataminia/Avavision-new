@@ -32,7 +32,7 @@ export const api = {
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {}),
   put: <T>(path: string, body: unknown) => request<T>("PUT", path, body),
   delete: <T>(path: string) => request<T>("DELETE", path),
-  upload: <T>(path: string, file: Blob) => request<T>("POST", path, undefined, file),
+  upload: <T>(path: string, file: Blob, method = "POST") => request<T>(method, path, undefined, file),
 };
 
 export function errorText(error: unknown): string {

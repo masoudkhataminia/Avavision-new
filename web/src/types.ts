@@ -22,6 +22,7 @@ export type Live = {
   quad: [number, number][] | null;
   sharpness: number | null;
   locate_ms: number;
+  codes: string[];
 };
 
 export type Index = { row: number; column: number };
@@ -44,13 +45,14 @@ export type Layout = {
 
 export type Appearance = { colour: string | null; shape: string | null; imprint: string | null };
 export type Medication = { id: string; name: string; strength: string; appearance: Appearance };
-export type Catalog = { medications: Medication[] };
+export type Catalog = { medications: Medication[]; references?: string[] };
 
 export type ExpectedItem = { medication_id: string; quantity: number };
 export type Expectation = { compartment: Index; items: ExpectedItem[] };
 export type Profile = {
   id: string;
   reference: string;
+  barcode?: string | null;
   layout_id: string;
   compartments: Expectation[];
   created_at: string;
@@ -58,6 +60,7 @@ export type Profile = {
 export type ProfileSummary = {
   id: string;
   reference: string;
+  barcode: string | null;
   layout_id: string;
   doses: number;
   created_at: string;
@@ -75,7 +78,8 @@ export type CompartmentView = {
   label: string;
   status: CompartmentStatus;
   findings: string[];
-  expected: { id: string; name: string; quantity: number }[];
+  expected: { id: string; name: string; quantity: number; reference: boolean; range: string | null }[];
+  pills: { index: number; size: string | null; identity: string | null; fits: string[] | null }[];
   expected_count: number | null;
   observed_count: number | null;
   spot_check: boolean;
@@ -94,7 +98,8 @@ export type DetectionView = {
 export type CheckView = {
   session_id: string;
   phase: "capturing" | "analyzed" | "completed";
-  profile: { id: string; reference: string };
+  profile: { id: string; reference: string; barcode: string | null };
+  card_codes: string[];
   layout: Layout;
   timings: Record<string, number | object>;
   evidence: boolean;

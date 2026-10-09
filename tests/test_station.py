@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 import onnx
 import pytest
@@ -278,3 +279,85 @@ def test_other_web_sites_cannot_drive_the_station(tmp_path):
     )
     assert client.get("/api/status", headers={"Host": "evil.example"}).status_code == 400
     station.db.close()
+
+
+def test_size_catches_a_swapped_white_tablet_that_counting_alone_misses(client):
+    import uuid
+
+    layout_id = client.get("/api/status").json()["layout"]["id"]
+    compartments = [
+        {"compartment": {"row": r, "column": c}, "items": [{"medication_id": "metformin-500", "quantity": 1}]}
+        for r in range(4)
+        for c in range(7)
+    ]
+    profile = {"id": str(uuid.uuid4()), "reference": "MET-ONLY", "layout_id": layout_id, "compartments": compartments}
+    assert client.put(f"/api/profiles/{profile['id']}", json=profile).status_code == 200
+
+    # Before the brain knows metformin's size, a white tablet in its place only matches the count.
+    view = run_check(client, profile["id"], fault="swapped")
+    assert view["result"]["status"] == "countMatched"
+    client.post("/api/check/sign-off", json={"pharmacist": "MK", "decision": "withheld", "reviews": []})
+
+    for _ in range(2):  # two packs taught: size and colour ranges are established
+        assert client.post("/api/brain/teach", json={"medication_id": "metformin-500"}).status_code == 200
+    view = run_check(client, profile["id"], fault="swapped")
+    flagged = [c for c in view["result"]["compartments"] if c["status"] != "countMatched"]
+    assert len(flagged) == 1 and flagged[0]["status"] == "needsReview"
+    assert any("size or colour" in f for f in flagged[0]["findings"])
+
+
+def test_observed_pills_shown_next_to_confirmed_references(client):
+    assert client.get("/api/medications/aspirin-100/reference.jpg").status_code == 404
+    assert client.post("/api/brain/teach", json={"medication_id": "aspirin-100"}).status_code == 200
+    assert client.get("/api/medications/aspirin-100/reference.jpg").status_code == 200  # most typical taught pill
+
+    view = run_check(client, client.get("/api/profiles").json()[0]["id"])
+    morning = next(c for c in view["result"]["compartments"] if c["row"] == 0 and c["column"] == 0)
+    assert len(morning["pills"]) == 2 and all(p["size"].endswith("mm") or "mm" in p["size"] for p in morning["pills"])
+    assert {e["id"]: e["reference"] for e in morning["expected"]} == {"metformin-500": False, "aspirin-100": True}
+    assert client.get(f"/api/check/pills/{morning['pills'][0]['index']}.jpg").status_code == 200
+
+    photo = cv2.imencode(".jpg", np.full((60, 60, 3), 200, np.uint8))[1].tobytes()
+    assert client.put("/api/medications/metformin-500/reference", content=photo).status_code == 200
+    assert client.get("/api/medications/metformin-500/reference.jpg").status_code == 200
+    assert client.put("/api/medications/nope/reference", content=photo).status_code == 409
+    assert client.put("/api/medications/metformin-500/reference", content=b"").status_code == 200
+    assert client.get("/api/medications/metformin-500/reference.jpg").status_code == 404
+
+
+def test_header_card_opens_its_profile_and_another_packs_card_stops_release(client):
+    from avavision.vision.codes import read_codes
+    from avavision.vision.synthetic import Scene
+    from avavision.vision.synthetic import Station as SimulatedStation
+
+    assert read_codes(SimulatedStation().render(Scene(card="WP-123"))) == ["WP-123"]
+    assert read_codes(SimulatedStation().render(Scene())) == []
+
+    profile = next(p for p in client.get("/api/profiles").json() if p["reference"] == "DEMO-001")
+    assert profile["barcode"] == "DEMO-001"
+    view = run_check(client, profile["id"])
+    assert view["card_codes"] == ["DEMO-001"] and view["result"]["status"] == "countMatched"
+    deadline = time.time() + 5
+    while "DEMO-001" not in (client.get("/api/live").json() or {}).get("codes", []) and time.time() < deadline:
+        time.sleep(0.1)
+    assert "DEMO-001" in client.get("/api/live").json()["codes"]
+    client.post("/api/check/sign-off", json={"pharmacist": "MK", "decision": "withheld", "reviews": []})
+
+    view = run_check(client, profile["id"], fault="wrongCard")
+    assert view["result"]["status"] == "needsReview"
+    assert any("not this profile's card" in f for f in view["result"]["pack_findings"])
+    release = {"pharmacist": "MK", "decision": "released", "reviews": reviews(view)}
+    refused = client.post("/api/check/sign-off", json=release)
+    assert refused.json()["kind"] == "packFindingsNotAcknowledged"
+    signed = client.post("/api/check/sign-off", json=release | {"acknowledged_pack_findings": True}).json()
+    record = client.get(f"/api/audit/{signed['audit_sequence']}").json()["record"]
+    assert record["card_codes"] == ["OTHER-PACK-777"]
+
+
+def test_checking_records_export_for_qcpp(client):
+    view = run_check(client, client.get("/api/profiles").json()[0]["id"])
+    client.post("/api/check/sign-off", json={"pharmacist": "MK", "decision": "released", "reviews": reviews(view)})
+    rows = client.get("/api/audit/export.csv").text.strip().splitlines()
+    assert rows[0].startswith("entry,signed_at,pack_reference") and len(rows) == 2
+    assert ",DEMO-001,DEMO-001,station-1,countMatched,released,MK,28,0," in rows[1]
+    assert len(client.get("/api/audit/export.csv?since=2999-01-01").text.strip().splitlines()) == 1

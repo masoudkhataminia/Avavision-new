@@ -28,6 +28,31 @@
 - الگوی صنعت همان معماری AvaVision است: نور ثابت، کتابخانه‌ی محلی که یاد می‌گیرد، وضعیت «مشکوک» و تصمیم انسانی.
 - بازار استرالیا برای بررسی تصویری Webster-pak خالی به نظر می‌رسد.
 
+### به‌روزرسانی ۲۰۲۶-۱۰-۰۹: الگوبرداری
+
+| سیستم | چه کاری می‌کند | در AvaVision |
+|---|---|---|
+| [BD Parata InspectRx 2](https://parata.com/wp-content/uploads/BDMMS515-InspectRx-Brochure-R4.00-RGB_UPDATED-02OCT2025.pdf) | مقایسه با **عکس مرجعی که داروساز تأیید کرده**؛ قرص اشتباه، شکسته یا روی هم | قرص‌های دیده‌شده‌ی هر خانه کنار عکس مرجع هر دارو (D-129) |
+| [JVM VIZEN EX](https://www.kedglobal.com/bio-pharma/newsView/ked202301100005)، [Omnicell VBM 200F](https://www.omnicell.com/products/medication-adherence/vbm-200f-multimed-automation-blister-card-packaging-machine-x155) | مقایسه‌ی تعداد، **اندازه، شکل و رنگ** با اطلاعات ثبت‌شده‌ی دارو | کانال دوم مدرک: اندازه‌ی میلی‌متری و رنگ (D-127) |
+| [Eyecon Optical Pill Verification](https://www.einnews.com/pr_news/914168462/eyecon-launches-optical-pill-verification-to-strengthen-pharmacy-dispensing-accuracy) (ژوئیه‌ی ۲۰۲۶) | اندازه، شکل، رنگ و **نوشته‌ی روی قرص**؛ عکس رنگی هر پر کردن در سابقه | عکس شواهد هر بررسی (D-118)؛ خواندن نوشته‌ی قرص در نقشه‌ی راه |
+| [Webster-pak iCHECK](https://www.webstercare.com.au/product/webster-pak-icheck/) | باز کردن پروفایل از کارت سرپک، عکس رنگی داروها، سابقه برای QCPP؛ **بدون دوربین** | خواندن QR/بارکد کارت سرپک با همان دوربین، و خروجی سوابق برای QCPP (D-128) |
+
+## ثبت اختراع (مهم برای فروش)
+
+| سند | صاحب | وضعیت | موضوع |
+|---|---|---|---|
+| [US20240425257A1](https://patents.google.com/patent/US20240425257A1/en) | RxSafe | **در حال بررسی** | بررسی کارت بلیستر: گرفتن **یک سری عکس از هر خانه**، نمایش عکس کارت، انتخاب یک خانه و نمایش آن سری عکس. توضیحات آن پر کردن دستی را هم شامل می‌شود |
+| [AU2022204232B2](https://patents.google.com/patent/AU2022204232B2/en) | RxSafe | ثبت‌شده در استرالیا | بررسی پاکت (pouch) با دوربین مرئی + مادون قرمز و داشبورد مقایسه با قرص‌های مورد انتظار |
+| [US7946101](https://patents.google.com/patent/US7946101B1/en) | Walgreen | فعال تا حدود ۲۰۲۹ | بررسی محتوای کارت بلیستر چندخانه‌ای |
+
+AvaVision این‌ها را عمداً ندارد: دستگاه بسته‌بندی ندارد، از مادون قرمز استفاده نمی‌کند، و برای هر خانه **یک سری عکس زمانی** نمی‌گیرد و نشان نمی‌دهد (از کل پک سه عکس هم‌زمان می‌گیرد). این تحلیل حقوقی نیست؛ قبل از فروش، به‌خصوص در آمریکا، بررسی آزادی عمل (FTO) با وکیل ثبت اختراع لازم است (D-125).
+
+## عکس رسمی داروها (eMIMS)
+
+- مجوز کاربر نهایی eMIMS استفاده را به داخل خود محصول محدود می‌کند و کپی و توزیع دوباره را منع می‌کند؛ عکس‌ها جزو محتوای دارای حق کپی‌اند ([شرایط MIMS](https://mims.com.au/index.php/footer/terms-and-conditions/mims-end-user-licence-agreement)).
+- راه قانونی: [MIMS API](https://developer.mims.com/au/Home/AboutAU) برای شرکت‌های نرم‌افزاری، با بخش Product images (بیش از ۳۴۰۰ عکس) و پشتیبانی از تأمین‌کننده‌های پک دارویی ([MIMS Integrated](https://mims.com.au/index.php/products/mims-integrated)). تماس: `api@mims.com.au`.
+- نکته‌ی فنی: عکس کاتالوگ برای «عکس مرجع» عالی است، ولی مغز باید ظاهر قرص را زیر پلاستیک و با دوربین ایستگاه یاد بگیرد (D-126).
+
 ## ۳. ابزار اجرا روی Windows (به‌روزرسانی ۲۰۲۶-۱۰-۰۹)
 
 | ابزار | استفاده در AvaVision |

@@ -15,10 +15,12 @@ from datetime import UTC, datetime
 import numpy as np
 from pydantic import BaseModel
 
+from ..core.physical import PhysicalFeatures, PhysicalPolicy, PhysicalRange
 from .calibration import CalibrationReport, IdentityCalibrator
 from .identity import EmbedderID, IdentityClassifier, IdentityPolicy, MedicationID
 from .knowledge import AddOutcome, Exemplar, ExemplarSource, KnowledgeBase
 from .learning import LabellingTask, LearningPlan
+from .physical import PhysicalMemory, PhysicalSample
 from .trust import TrustLedger, TrustPolicy, TrustStatus
 
 
@@ -38,6 +40,7 @@ class LearningSummary:
     duplicates_skipped: int = 0
     observations_recorded: int = 0
     tasks_queued: int = 0
+    measurements_added: int = 0
     recalibration: CalibrationReport | None = None
 
 
@@ -48,6 +51,8 @@ class Brain:
         self.trust_policy = trust_policy or TrustPolicy()
         self.ledger = TrustLedger(embedder_id=embedder_id)
         self.labelling_queue: list[LabellingTask] = []
+        self.physical = PhysicalMemory()
+        self.physical_policy = PhysicalPolicy()
         self.last_calibration: CalibrationReport | None = None
         self.exemplars_at_calibration = 0
 
@@ -91,6 +96,9 @@ class Brain:
         for observation in plan.observations:
             self.ledger.observe(observation.decision, observation.truth, at)
             summary.observations_recorded += 1
+        for sample in plan.measurements:
+            self.physical.add(sample)
+        summary.measurements_added = len(plan.measurements)
         self.labelling_queue.extend(plan.tasks)
         self.labelling_queue.sort(key=lambda t: (-t.priority, -t.created_at.timestamp()))
         summary.tasks_queued = len(plan.tasks)
@@ -104,11 +112,13 @@ class Brain:
         vectors: list[tuple[np.ndarray, str | None]],
         group_id: str | None = None,
         at: datetime | None = None,
+        measurements: list[PhysicalFeatures] | None = None,
     ) -> LearningSummary:
         """Teaches a medication from photos of pills the pharmacist knows to be that medication."""
         at = at or datetime.now(UTC)
         group = group_id or f"teach-{at.timestamp()}"
         plan = LearningPlan(
+            measurements=[PhysicalSample(medication, f, group, created_at=at) for f in measurements or []],
             exemplars=[
                 Exemplar(
                     medication_id=medication,
@@ -120,7 +130,7 @@ class Brain:
                     crop_file=crop,
                 )
                 for v, crop in vectors
-            ]
+            ],
         )
         return self.learn(plan, at)
 
@@ -140,6 +150,11 @@ class Brain:
     def forget(self, medication: MedicationID) -> None:
         self.knowledge.forget(medication)
         self.ledger.forget(medication)
+        self.physical.forget(medication)
+
+    def physical_ranges(self) -> dict[MedicationID, PhysicalRange]:
+        """Size and colour ranges of every medication confirmed often enough (see ``core.physical``)."""
+        return self.physical.ranges(self.physical_policy)
 
     # ------------------------------------------------------------------ calibration
 
@@ -184,6 +199,8 @@ class Brain:
                     )
                 )
         nxt.learn(plan)
+        nxt.physical = self.physical  # size and colour do not depend on the eye
+        nxt.physical_policy = self.physical_policy
         return nxt
 
     @property

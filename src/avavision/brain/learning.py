@@ -10,9 +10,11 @@ from datetime import UTC, datetime
 import numpy as np
 
 from ..core.models import CompartmentIndex, PackLayout, PackProfile
+from ..core.physical import PhysicalFeatures
 from ..core.signoff import ReviewOutcome, SignOff
 from .identity import EmbedderID, IdentityDecision, IdentityEvidence, MedicationID
 from .knowledge import Exemplar, ExemplarSource
+from .physical import PhysicalSample
 
 
 @dataclass
@@ -25,6 +27,7 @@ class PillSighting:
     identity: IdentityEvidence | None
     crop_file: str | None = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    features: PhysicalFeatures | None = None
 
 
 @dataclass
@@ -38,6 +41,7 @@ class LearningPlan:
     exemplars: list[Exemplar] = field(default_factory=list)
     observations: list[Observation] = field(default_factory=list)
     tasks: list[LabellingTask] = field(default_factory=list)
+    measurements: list[PhysicalSample] = field(default_factory=list)
 
     def learn(self, sighting: PillSighting, medication: MedicationID, source: ExemplarSource, group: str, at: datetime):
         if sighting.vector is not None and sighting.embedder_id is not None:
@@ -54,6 +58,8 @@ class LearningPlan:
             )
         if sighting.identity is not None:
             self.observations.append(Observation(sighting.identity.decision, medication))
+        if sighting.features is not None:
+            self.measurements.append(PhysicalSample(medication, sighting.features, group, created_at=at))
 
 
 class LabellingError(ValueError):

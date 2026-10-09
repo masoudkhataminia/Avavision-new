@@ -47,6 +47,9 @@ export function AuditPage({ onChange }: { onChange: () => void }) {
           <button onClick={verify} disabled={busy !== null}>
             Verify hash chain
           </button>
+          <a href="/api/audit/export.csv" download>
+            Export checking records (CSV, for QCPP)
+          </a>
         </div>
         {verdict && <div className={verdict.startsWith("Intact") ? "notice" : "error"}>{verdict}</div>}
         {error && <div className="error">{error}</div>}

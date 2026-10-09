@@ -20,9 +20,11 @@ from ..brain.calibration import CalibrationReport
 from ..brain.identity import IdentityEvidence, IdentityPolicy
 from ..brain.knowledge import Exemplar, ExemplarSource
 from ..brain.learning import LabellingTask, PillSighting
+from ..brain.physical import PhysicalSample
 from ..brain.trust import TrustLedger, TrustPolicy
 from ..core.audit import GENESIS_HASH, AuditEntry, ChainDefect, CheckRecord, entry_hash, make_entry, verify_chain
 from ..core.models import WEEKLY_7X4, Catalog, CompartmentIndex, PackLayout, PackProfile
+from ..core.physical import PhysicalFeatures
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -36,6 +38,10 @@ CREATE TABLE IF NOT EXISTS exemplars (
 );
 CREATE INDEX IF NOT EXISTS exemplars_medication ON exemplars(medication_id);
 CREATE TABLE IF NOT EXISTS labelling_tasks (id TEXT PRIMARY KEY, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS physical_samples (
+  id TEXT PRIMARY KEY, medication_id TEXT NOT NULL, group_id TEXT NOT NULL, created_at TEXT NOT NULL,
+  features TEXT NOT NULL
+);
 """
 
 
@@ -228,6 +234,9 @@ class Database:
                 "SELECT id, medication_id, embedder_id, source, group_id, created_at, crop_file, vector FROM exemplars"
             ).fetchall()
             tasks = [json.loads(r[0]) for r in self._db.execute("SELECT json FROM labelling_tasks").fetchall()]
+            physical = self._db.execute(
+                "SELECT id, medication_id, group_id, created_at, features FROM physical_samples"
+            ).fetchall()
         brain = Brain(meta["embedder_id"], TrustPolicy.model_validate(meta["trust_policy"]))
         for r in rows:
             brain.knowledge.add(
@@ -249,6 +258,16 @@ class Database:
         )
         brain.exemplars_at_calibration = meta.get("exemplars_at_calibration", 0)
         brain.labelling_queue = [self._task_from_dict(t) for t in tasks]
+        for r in physical:
+            brain.physical.add(
+                PhysicalSample(
+                    id=r[0],
+                    medication_id=r[1],
+                    group_id=r[2],
+                    created_at=datetime.fromisoformat(r[3]),
+                    features=PhysicalFeatures.model_validate_json(r[4]),
+                )
+            )
         return brain
 
     def save_brain(self, brain: Brain) -> None:
@@ -285,6 +304,17 @@ class Database:
                     if i not in stored
                 ],
             )
+            samples = {p.id: p for p in brain.physical.samples}
+            kept = {r[0] for r in self._db.execute("SELECT id FROM physical_samples").fetchall()}
+            self._db.executemany("DELETE FROM physical_samples WHERE id = ?", [(i,) for i in kept - samples.keys()])
+            self._db.executemany(
+                "INSERT INTO physical_samples(id, medication_id, group_id, created_at, features) VALUES(?, ?, ?, ?, ?)",
+                [
+                    (p.id, p.medication_id, p.group_id, p.created_at.isoformat(), p.features.model_dump_json())
+                    for i, p in samples.items()
+                    if i not in kept
+                ],
+            )
             self._db.execute("DELETE FROM labelling_tasks")
             self._db.executemany(
                 "INSERT INTO labelling_tasks(id, json) VALUES(?, ?)",
@@ -319,6 +349,7 @@ class Database:
                     "embedder_id": s.embedder_id,
                     "crop_file": s.crop_file,
                     "identity": s.identity.model_dump(mode="json") if s.identity else None,
+                    "features": s.features.model_dump() if s.features else None,
                 }
                 for s in task.sightings
             ],
@@ -341,6 +372,7 @@ class Database:
                     embedder_id=s["embedder_id"],
                     crop_file=s["crop_file"],
                     identity=IdentityEvidence.model_validate(s["identity"]) if s["identity"] else None,
+                    features=PhysicalFeatures.model_validate(s["features"]) if s.get("features") else None,
                 )
                 for s in d["sightings"]
             ],

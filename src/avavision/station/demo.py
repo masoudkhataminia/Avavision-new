@@ -46,6 +46,7 @@ class DemoFault(StrEnum):
     SWAPPED = "swapped"  # one dose replaced by another medication
     FOREIGN = "foreign"  # something that is not a tablet
     EMPTY_TRAY = "emptyTray"
+    WRONG_CARD = "wrongCard"  # another pack's header card beside the tray
 
 
 def demo_catalog() -> Catalog:
@@ -55,6 +56,7 @@ def demo_catalog() -> Catalog:
 def demo_profile(station: Station) -> PackProfile:
     layout = station.layout()
     profile = PackProfile.empty("DEMO-001", layout)
+    profile.barcode = "DEMO-001"
     plan = {
         0: [("metformin-500", 1), ("aspirin-100", 1)],
         1: [("perindopril-5", 1)],
@@ -71,6 +73,7 @@ def scene_for(profile: PackProfile | None, fault: DemoFault, seed: int = 0) -> S
     scene = Scene()
     if profile is None or fault == DemoFault.EMPTY_TRAY:
         return scene
+    scene.card = "OTHER-PACK-777" if fault == DemoFault.WRONG_CARD else profile.barcode
     for expectation in profile.compartments:
         scene.contents[expectation.compartment] = [
             item.medication_id
@@ -79,7 +82,7 @@ def scene_for(profile: PackProfile | None, fault: DemoFault, seed: int = 0) -> S
             if item.medication_id in PALETTE
         ]
     filled = sorted(i for i, c in scene.contents.items() if c)
-    if not filled or fault == DemoFault.NONE:
+    if not filled or fault in (DemoFault.NONE, DemoFault.WRONG_CARD):
         return scene
     rng = random.Random(seed)
     target = rng.choice(filled)

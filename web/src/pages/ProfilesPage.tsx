@@ -273,6 +273,16 @@ export function ProfilesPage() {
                   }}
                 />
               </label>
+              <label>
+                Header-card code (QR / barcode)
+                <input
+                  value={profile.barcode ?? ""}
+                  onChange={(e) => {
+                    setProfile({ ...profile, barcode: e.target.value.trim() || null });
+                    setSaved(false);
+                  }}
+                />
+              </label>
               <span className="muted small">{layout.display_name}</span>
               <button className="primary" onClick={save} disabled={busy !== null || saved}>
                 {saved ? "Saved" : "Save profile"}

@@ -55,6 +55,8 @@ class CheckRecord(BaseModel):
     evidence_images: list[str] = []
     #: Advisory second opinions received before sign-off (they can only have escalated the result).
     advisories: list[AdvisoryOpinion] = []
+    #: Header-card codes the camera read during the check.
+    card_codes: list[str] = []
 
 
 class AuditEntry(BaseModel):

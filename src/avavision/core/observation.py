@@ -158,6 +158,8 @@ class Detection(BaseModel):
     confidence: float
     box: Rect  # normalized image coordinates
     identity: IdentityEvidence | None = None
+    #: Measured size and colour, compared with the expected medications' confirmed ranges.
+    physical: PhysicalEvidence | None = None
 
 
 class FrameObservation(BaseModel):
@@ -180,6 +182,7 @@ class PlacedObject:
     identity: IdentityEvidence | None
     pack_center: Point | None
     location: CellLocation
+    physical: PhysicalEvidence | None = None
 
 
 @dataclass
@@ -207,11 +210,14 @@ def assign(detections: list[Detection], registration: Registration, layout: Pack
                     detection.identity,
                     None,
                     CellLocation(kind=CellLocationKind.OUTSIDE),
+                    detection.physical,
                 )
             )
             continue
         location = layout.locate(center)
-        placed = PlacedObject(index, resolved, detection.confidence, detection.identity, center, location)
+        placed = PlacedObject(
+            index, resolved, detection.confidence, detection.identity, center, location, detection.physical
+        )
         if location.kind == CellLocationKind.INSIDE:
             result.inside.setdefault(location.compartments[0], []).append(placed)
         elif location.kind == CellLocationKind.BORDER:
@@ -238,6 +244,7 @@ def pill_compartments(
 
 
 from ..brain.identity import IdentityEvidence  # noqa: E402  (resolve forward reference)
+from .physical import PhysicalEvidence  # noqa: E402
 
 Detection.model_rebuild()
 FrameObservation.model_rebuild()

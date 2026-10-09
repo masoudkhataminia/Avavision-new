@@ -253,6 +253,8 @@ class PackProfile(BaseModel):
     reference: str
     layout_id: str
     compartments: list[CompartmentExpectation]
+    #: Code printed on the pack's header card (QR or barcode), when the packing software prints one.
+    barcode: str | None = None
     created_at: datetime = Field(default_factory=_now)
 
     @classmethod

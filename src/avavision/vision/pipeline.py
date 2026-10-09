@@ -18,9 +18,11 @@ import numpy as np
 from ..brain.identity import IdentityClassifier, IdentityEvidence
 from ..core.gate import ActiveModel
 from ..core.geometry import Rect
-from ..core.models import CompartmentIndex, PackLayout
+from ..core.models import CompartmentIndex, MedicationID, PackLayout
 from ..core.observation import CaptureIssue, FrameObservation, RegistrationOutcome, pill_compartments, register
+from ..core.physical import PhysicalFeatures, PhysicalRange, physical_evidence
 from .embedder import Embedder
+from .measure import measure_pill, millimetres_per_pixel
 from .pack_finder import FinderMode, Orientation, find_pack
 from .quality import QualityPolicy, assess
 from .segmentation import PocketSegmenter, Rectified, rectify
@@ -33,6 +35,7 @@ class IdentifiedPill:
     crop: np.ndarray  # BGR, perspective-corrected
     vector: np.ndarray
     identity: IdentityEvidence
+    features: PhysicalFeatures | None = None
 
 
 @dataclass
@@ -108,7 +111,10 @@ class FrameAnalyzer:
         classifier: IdentityClassifier,
         model: ActiveModel,
         minimum_confidence: float,
+        ranges: dict[MedicationID, PhysicalRange] | None = None,
     ) -> AnalyzedFrame:
+        """The brain's opinion and the physical measurements of every confident pill. ``ranges`` are the confirmed
+        size and colour ranges each pill is compared with (see ``core.physical``)."""
         if frame.rectified is None:
             return frame
         start = time.perf_counter()
@@ -119,11 +125,14 @@ class FrameAnalyzer:
         if keep:
             vectors = embedder.embed([crops[k] for k in keep])
             evidence = classifier.classify_many(vectors)
+            scale = millimetres_per_pixel(frame.rectified, self.layout)
             detections = list(frame.observation.detections)
             for k, vector, ev in zip(keep, vectors, evidence, strict=True):
                 i = indices[k]
-                detections[i] = detections[i].model_copy(update={"identity": ev})
-                frame.pills.append(IdentifiedPill(i, located[i], crops[k], vector, ev))
+                features = measure_pill(crops[k], scale)
+                physical = physical_evidence(features, ranges or {}) if features else None
+                detections[i] = detections[i].model_copy(update={"identity": ev, "physical": physical})
+                frame.pills.append(IdentifiedPill(i, located[i], crops[k], vector, ev, features))
             frame.observation = frame.observation.model_copy(update={"detections": detections})
         frame.timings_ms["identify"] = _ms(start)
         return frame
@@ -186,6 +195,9 @@ def propagate_identities(source: AnalyzedFrame, target: AnalyzedFrame, layout: P
         )
         if best is not None and best[0] <= tolerance:
             used.add(best[1])
-            detections[i] = detection.model_copy(update={"identity": anchors[best[1]][1].identity})
+            source_detection = source.observation.detections[anchors[best[1]][1].detection_index]
+            detections[i] = detection.model_copy(
+                update={"identity": anchors[best[1]][1].identity, "physical": source_detection.physical}
+            )
     target.observation = target.observation.model_copy(update={"detections": detections})
     return target

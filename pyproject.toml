@@ -16,7 +16,8 @@ dependencies = [
   "pydantic==2.11.7",
   "fastapi==0.116.1",
   "uvicorn==0.35.0",
-  "anthropic>=1.12,<2",                         # MIT; the language-model expert (structured outputs, fallbacks)
+  "anthropic>=1.12,<2",
+  "zxing-cpp==3.1.1",                           # Apache-2.0; header-card QR codes and barcodes                         # MIT; the language-model expert (structured outputs, fallbacks)
 ]
 
 [project.optional-dependencies]
