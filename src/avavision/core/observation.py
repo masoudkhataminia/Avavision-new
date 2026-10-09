@@ -125,12 +125,15 @@ class MeaningKind(StrEnum):
     MEDICATION = "medication"
     BROKEN = "broken"
     FOREIGN = "foreign"
+    #: Something that hides the compartment's content (glare, a label): what is behind it is unknown.
+    OBSCURED = "obscured"
     IGNORE = "ignore"
 
 
 @dataclass(frozen=True)
 class LabelMeaning:
-    """What a model label means. Encoded as "pill", "broken", "foreign", "ignore" or "medication:<id>"."""
+    """What a model label means. Encoded as "pill", "broken", "foreign", "obscured", "ignore" or
+    "medication:<id>"."""
 
     kind: MeaningKind
     medication_id: MedicationID | None = None
@@ -167,6 +170,8 @@ class FrameObservation(BaseModel):
     quality: QualityAssessment
     registration: RegistrationOutcome
     detections: list[Detection] = []
+    #: Compartments whose content the camera cannot see (glare or a covering); see ``vision.quality``.
+    obscured: list[CompartmentIndex] = []
     image_sha256: str | None = None
 
     @property

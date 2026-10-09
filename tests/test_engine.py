@@ -27,6 +27,7 @@ from conftest import (
     ASPIRIN,
     ATORVASTATIN,
     FIXED,
+    IDENTITY_LABELS,
     LAYOUT,
     METFORMIN,
     ONE,
@@ -321,3 +322,41 @@ def test_pill_compartments_lists_confident_doses_clearly_inside():
         detection("pill", Point(x=r.max_x - 0.005, y=r.center.y)),
     ]
     assert pill_compartments(frame(dets), LAYOUT, 0.6, engine().model.meaning) == {0: TARGET}
+
+
+def test_obscured_compartment_needs_review_and_its_count_proves_nothing():
+    others = [d for i in LAYOUT.all_compartments if i != TARGET for d in detections("pill", 1, i)]
+    fs = frames(others)
+    fs[1] = fs[1].model_copy(update={"obscured": [TARGET]})  # one frame is enough
+    v = engine().evaluate(profile(ONE), fs).verdict(TARGET)
+    assert v.status == CompartmentStatus.NEEDS_REVIEW and FindingKind.VIEW_OBSCURED in kinds(v)
+    assert FindingKind.MISSING not in kinds(v)
+    extra = [frame(full_pack() + detections("pill", 2, TARGET)[1:]).model_copy(update={"obscured": [TARGET]})] * 3
+    assert FindingKind.EXTRA not in kinds(engine().evaluate(profile(ONE), extra).verdict(TARGET))
+
+
+def test_obscured_label_from_a_detector_blocks_verification_whatever_its_confidence():
+    labels = IDENTITY_LABELS | {"glare": "obscured"}
+    model = identity_model({METFORMIN, ATORVASTATIN})
+    model = model.model_copy(update={"manifest": model.manifest.model_copy(update={"labels": labels})})
+    eng = engine(model)
+    glare = detections("glare", 1, TARGET, confidence=0.2)
+    v = evaluate(two_in_target("metformin", "atorvastatin") + glare, IDENTITY_PROFILE, eng).verdict(TARGET)
+    assert v.status == CompartmentStatus.NEEDS_REVIEW and kinds(v) == [FindingKind.VIEW_OBSCURED]
+    layout = LAYOUT.model_copy(update={"grid_region": Rect(x=0.1, y=0.1, width=0.8, height=0.8)})
+    inside = [detection("pill", layout.cell_rect(i).center) for i in layout.all_compartments]
+    outside = detection("glare", Point(x=0.03, y=0.5))  # reflections off the bench are not objects in the pack
+    result = engine(model, layout=layout).evaluate(profile(ONE), frames([*inside, outside]))
+    assert result.pack_findings == [] and result.status == PackStatus.COUNT_MATCHED
+
+
+def test_a_detector_that_sees_almost_nothing_cannot_confirm_empty_compartments():
+    expected_empty = profile(ONE, {TARGET: []})
+    blind = engine().evaluate(expected_empty, frames([]))
+    v = blind.verdict(TARGET)
+    assert v.status == CompartmentStatus.NEEDS_REVIEW and FindingKind.PACK_NOT_SEEN in kinds(v)
+    assert blind.pack_findings[0].kind == PackFindingKind.TOO_FEW_DOSES_SEEN
+    assert (blind.pack_findings[0].count, blind.pack_findings[0].required) == (0, 5)
+    others = [d for i in LAYOUT.all_compartments if i not in (TARGET, cell(1, 0)) for d in detections("pill", 1, i)]
+    one_missing = engine().evaluate(expected_empty, frames(others))
+    assert one_missing.pack_findings == [] and one_missing.verdict(TARGET).status == CompartmentStatus.COUNT_MATCHED

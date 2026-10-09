@@ -28,6 +28,7 @@ def test_catalog_layouts_profiles_and_settings(tmp_path):
     assert db.catalog() == CATALOG
     assert db.profiles() == [p] and db.profile(str(p.id)) == p
     assert db.layouts()[0].width_mm == 260 and db.setting("orientation") == "automatic" and db.setting("x", 5) == 5
+    assert [layout.id for layout in db.layouts()] == ["weekly-7x4", "weekly-7x4-portrait"]
     db.delete_profile(str(p.id))
     assert db.profiles() == []
 

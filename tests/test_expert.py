@@ -8,7 +8,7 @@ import pytest
 
 from avavision.core.advisory import AdvisoryOpinion, AdvisoryVerdict, apply_advisories
 from avavision.core.engine import CompartmentStatus, FindingKind, PackFinding, PackFindingKind, PackStatus, finding
-from avavision.core.models import WEEKLY_7X4, Catalog, Medication, cell
+from avavision.core.models import WEEKLY_7X4, WEEKLY_7X4_PORTRAIT, Catalog, Medication, cell
 from avavision.core.session import CheckSession, SessionError
 from avavision.expert.charts import (
     ChartDose,
@@ -104,6 +104,20 @@ def test_weekly_dose_needs_the_first_day_and_halves_are_never_placed():
     assert "alendronate-70" not in draft.profile.expectation(cell(0, 4)).quantities
     assert (ImportIssueKind.FRACTIONAL_DOSE, 5) in kinds(draft)
     assert all("amlodipine-5" not in c.quantities for c in draft.profile.compartments)
+
+
+def test_portrait_card_with_printed_weekdays_needs_no_first_day():
+    draft = chart_to_profile(chart(), CHART_CATALOG, WEEKLY_7X4_PORTRAIT, "PACK-1", overrides={5: "amlodipine-5"})
+    assert (ImportIssueKind.UNKNOWN_START_DAY, 4) not in kinds(draft)
+    for day in range(7):  # days run down the rows, dose times across the columns
+        expected = {"aspirin-100": 1, "metformin-500": 1} | ({"alendronate-70": 1} if day == 0 else {})
+        assert draft.profile.expectation(cell(day, 0)).quantities == expected
+        assert draft.profile.expectation(cell(day, 2)).quantities == {"metformin-500": 2}
+        assert draft.profile.expectation(cell(day, 3)).items == []
+    assert draft.profile.issues(WEEKLY_7X4_PORTRAIT, CHART_CATALOG) == []
+    # Printed weekdays win over the chart's first day: Monday stays in the Mon row.
+    wednesday = chart_to_profile(chart(Weekday.WEDNESDAY), CHART_CATALOG, WEEKLY_7X4_PORTRAIT, "PACK-1")
+    assert "alendronate-70" in wednesday.profile.expectation(cell(0, 0)).quantities
 
 
 def test_other_layouts_are_not_guessed():

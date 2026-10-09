@@ -4,7 +4,8 @@ Two methods:
 - **Markers (recommended for the station):** four ArUco markers printed on the tray, ids 0–3 at the
   top-left, top-right, bottom-right and bottom-left corners. Sub-pixel accurate, orientation is never
   ambiguous, and it works whatever colour the pack is.
-- **Outline:** the largest bright quadrilateral in the frame, for setups without a tray.
+- **Outline:** the pack card's own outline, for setups without a tray. The card may be lighter, darker or more
+  colourful than the background (real cards are often dark blue or green on a white bench).
 """
 
 from __future__ import annotations
@@ -52,8 +53,9 @@ def _detector() -> cv2.aruco.ArucoDetector:
 _ARUCO = _detector()
 
 
-def find_by_markers(gray: np.ndarray) -> FoundPack | None:
+def find_by_markers(image: np.ndarray) -> FoundPack | None:
     """Quad through the centres of markers 0–3; ``None`` unless all four are visible."""
+    gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     corners, ids, _ = _ARUCO.detectMarkers(gray)
     if ids is None:
         return None
@@ -71,33 +73,63 @@ def _order_corners(points: np.ndarray) -> np.ndarray:
     return np.array([points[np.argmin(s)], points[np.argmin(d)], points[np.argmax(s)], points[np.argmax(d)]])
 
 
-def find_by_outline(gray: np.ndarray, analysis_size: int = 1000) -> FoundPack | None:
-    """Largest convex quadrilateral covering at least a fifth of the frame."""
-    scale = min(1.0, analysis_size / max(gray.shape))
-    small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else gray
-    blurred = cv2.GaussianBlur(small, (5, 5), 0)
-    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+def _outline_masks(image: np.ndarray) -> list[np.ndarray]:
+    """Candidate card masks: brighter than the background, darker than it, and (in colour) more saturated."""
+    gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    masks = []
+    if float(blurred.std()) >= 4:  # a featureless frame has no brightness edge
+        _, bright = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        masks += [bright, cv2.bitwise_not(bright)]
+    if image.ndim == 3:
+        saturation = cv2.GaussianBlur(cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[..., 1], (5, 5), 0)
+        level, coloured = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if level >= 40:  # a real colour difference, not noise in a grey scene
+            masks.append(coloured)
+    return [cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8)) for m in masks]
+
+
+def _quad(hull: np.ndarray) -> np.ndarray | None:
+    """The hull simplified to four corners, loosening the tolerance until it fits."""
+    perimeter = cv2.arcLength(hull, True)
+    for tolerance in (0.02, 0.03, 0.04, 0.05, 0.06, 0.08):
+        approx = cv2.approxPolyDP(hull, tolerance * perimeter, True)
+        if len(approx) == 4:
+            return approx.reshape(4, 2).astype(float)
+        if len(approx) < 4:
+            return None
+    return None
+
+
+def find_by_outline(image: np.ndarray, analysis_size: int = 1000, minimum_confidence: float = 0.75) -> FoundPack | None:
+    """The largest card-like quadrilateral covering a fifth to 95 % of the frame (grey or BGR ``image``).
+
+    Blisters, labels and reflections break a card's silhouette, so each candidate is closed into its convex
+    hull; confidence is how solid the candidate is within that hull and how well four corners fit it. The
+    largest acceptable candidate wins, because a striped card also yields smaller, equally solid bands."""
+    scale = min(1.0, analysis_size / max(image.shape[:2]))
+    small = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else image
     h, w = small.shape[:2]
-    if float(blurred.std()) < 4:  # a featureless frame: nothing to find
-        return None
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     best: FoundPack | None = None
-    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
-        area = cv2.contourArea(contour)
-        if area < 0.2 * w * h:
-            break
-        approx = cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True)
-        if len(approx) != 4 or not cv2.isContourConvex(approx):
-            continue
-        ordered = _order_corners(approx.reshape(4, 2).astype(float))
-        if area > 0.95 * w * h:  # the whole frame, not a pack on a background
-            continue
-        rect_area = cv2.contourArea(ordered.astype(np.float32))
-        confidence = float(min(1.0, area / max(rect_area, 1)))
-        points = [Point(x=float(x / w), y=float(y / h)) for x, y in ordered]
-        best = FoundPack(quad=Quad.from_corners(points), confidence=confidence)
-        break
+    best_area = 0.0
+    for mask in _outline_masks(small):
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
+            area = cv2.contourArea(contour)
+            if area < 0.2 * w * h:
+                break
+            hull = cv2.convexHull(contour)
+            hull_area = cv2.contourArea(hull)
+            corners = _quad(hull)
+            if corners is None or hull_area > 0.95 * w * h:  # the whole frame, not a card on a background
+                continue
+            ordered = _order_corners(corners)
+            quad_area = cv2.contourArea(ordered.astype(np.float32))
+            fit = min(quad_area, hull_area) / max(quad_area, hull_area, 1)
+            confidence = float(area / max(hull_area, 1) * fit)
+            if confidence >= minimum_confidence and hull_area > best_area:
+                points = [Point(x=float(x / w), y=float(y / h)) for x, y in ordered]
+                best, best_area = FoundPack(quad=Quad.from_corners(points), confidence=confidence), hull_area
     return best
 
 
@@ -116,14 +148,15 @@ def quarter_turns(quad: Quad, orientation: Orientation, image_w: int, image_h: i
 
 
 def find_pack(
-    gray: np.ndarray, mode: FinderMode, layout: PackLayout, orientation: Orientation = Orientation.AUTOMATIC
+    image: np.ndarray, mode: FinderMode, layout: PackLayout, orientation: Orientation = Orientation.AUTOMATIC
 ) -> FoundPack | None:
+    """``image`` is grey or BGR; the outline method also uses colour when it has it."""
     if mode == FinderMode.MARKERS:
-        return find_by_markers(gray)
-    found = find_by_outline(gray)
+        return find_by_markers(image)
+    found = find_by_outline(image)
     if found is None:
         return None
-    turns = quarter_turns(found.quad, orientation, gray.shape[1], gray.shape[0], layout)
+    turns = quarter_turns(found.quad, orientation, image.shape[1], image.shape[0], layout)
     return FoundPack(quad=found.quad.rotated(turns), confidence=found.confidence)
 
 

@@ -33,8 +33,8 @@ class Weekday(StrEnum):
 
 
 WEEK = list(Weekday)
-#: Pack rows from top to bottom (see ``WEEKLY_7X4``).
-DOSE_ROWS = {DoseTime.BREAKFAST: 0, DoseTime.LUNCH: 1, DoseTime.DINNER: 2, DoseTime.BEDTIME: 3}
+#: Position of each dose time: rows from the top in ``WEEKLY_7X4``, columns from the left in the portrait layout.
+DOSE_SLOTS = {DoseTime.BREAKFAST: 0, DoseTime.LUNCH: 1, DoseTime.DINNER: 2, DoseTime.BEDTIME: 3}
 
 
 class ChartDose(BaseModel):
@@ -115,6 +115,24 @@ def match_line(line: ChartLine, catalog: Catalog) -> list[MedicationID]:
     ]
 
 
+def _weekday(label: str) -> Weekday | None:
+    text = label.strip().lower()
+    return next((d for d in WEEK if len(text) >= 3 and d.value.startswith(text[:3])), None)
+
+
+def _weekly_grid(layout: PackLayout) -> tuple[bool, list[Weekday] | None] | None:
+    """For a weekly 7 × 4 layout: whether the days run down the rows (portrait card), and the weekday of each day
+    position when the card prints them (Mon … Sun). ``None`` for any other layout."""
+    if layout.rows == len(DOSE_SLOTS) and layout.columns == len(WEEK):
+        days_down, labels = False, layout.column_labels
+    elif layout.rows == len(WEEK) and layout.columns == len(DOSE_SLOTS):
+        days_down, labels = True, layout.row_labels
+    else:
+        return None
+    printed = [_weekday(label) for label in labels]
+    return days_down, (printed if None not in printed and len(set(printed)) == len(WEEK) else None)
+
+
 def chart_to_profile(
     chart: MedicationChart,
     catalog: Catalog,
@@ -122,7 +140,9 @@ def chart_to_profile(
     reference: str,
     overrides: dict[int, MedicationID] | None = None,
 ) -> ProfileDraft:
-    """Places every confidently matched line in a weekly 7 × 4 pack (days across, dose times down).
+    """Places every confidently matched line in a weekly 7 × 4 pack: days across and dose times down, or (portrait)
+    days down and dose times across. A card that prints its weekdays fixes where each day goes; otherwise the
+    chart's first day does.
 
     ``overrides`` maps line indices to the catalog medication a pharmacist chose for them.
     """
@@ -131,9 +151,11 @@ def chart_to_profile(
     issues: list[ImportIssue] = [ImportIssue(kind=ImportIssueKind.CHART_WARNING, detail=w) for w in chart.warnings]
     matches: dict[int, MedicationID] = {}
     not_packed: list[int] = []
-    if layout.rows != len(DOSE_ROWS) or layout.columns != len(WEEK):
+    grid = _weekly_grid(layout)
+    if grid is None:
         issues.append(ImportIssue(kind=ImportIssueKind.UNSUPPORTED_LAYOUT, detail=layout.id))
         return ProfileDraft(profile=profile, chart=chart, matches={}, issues=issues, not_packed=[])
+    days_down, printed = grid
 
     placed: dict[tuple[int, int], dict[MedicationID, int]] = {}
     for k, line in enumerate(chart.lines):
@@ -157,11 +179,11 @@ def chart_to_profile(
         if not days or not line.doses:
             issues.append(ImportIssue(kind=ImportIssueKind.NO_DOSES, line=k))
             continue
-        if len(days) < len(WEEK) and chart.first_day is None:
+        if len(days) < len(WEEK) and chart.first_day is None and printed is None:
             issues.append(ImportIssue(kind=ImportIssueKind.UNKNOWN_START_DAY, line=k))
             continue
         start = WEEK.index(chart.first_day) if chart.first_day else 0
-        columns = [(WEEK.index(d) - start) % len(WEEK) for d in days]
+        positions = [printed.index(d) if printed else (WEEK.index(d) - start) % len(WEEK) for d in days]
         for dose in line.doses:
             if dose.quantity <= 0:
                 continue
@@ -170,8 +192,9 @@ def chart_to_profile(
                     ImportIssue(kind=ImportIssueKind.FRACTIONAL_DOSE, line=k, detail=f"{dose.time}: {dose.quantity}")
                 )
                 continue
-            for column in columns:
-                slot = placed.setdefault((DOSE_ROWS[dose.time], column), {})
+            for day in positions:
+                time = DOSE_SLOTS[dose.time]
+                slot = placed.setdefault((day, time) if days_down else (time, day), {})
                 slot[medication] = slot.get(medication, 0) + int(dose.quantity)
 
     for (row, column), items in placed.items():

@@ -101,6 +101,31 @@ def test_engine_on_real_pixels_count_matches_and_finds_missing_dose():
     assert verdict.status == CompartmentStatus.MISMATCH and verdict.findings[0].kind == FindingKind.MISSING
 
 
+def test_glare_over_one_compartment_sends_it_to_review_without_a_count():
+    scene = full_scene(LAYOUT, TWO)
+    profile = PackProfile.empty("P", LAYOUT)
+    for index in LAYOUT.all_compartments:
+        profile.set_items(index, [ExpectedItem(medication_id=m, quantity=1) for m in TWO])
+    x0, y0, x1, y1 = STATION.frame
+    r = LAYOUT.cell_rect(cell(1, 2))
+
+    def glare(seed):
+        image = STATION.render(scene, seed=seed)
+        a = (int(x0 + (r.x + 0.15 * r.width) * (x1 - x0)), int(y0 + (r.y + 0.3 * r.height) * (y1 - y0)))
+        b = (int(x0 + (r.max_x - 0.4 * r.width) * (x1 - x0)), int(y0 + (r.max_y - 0.3 * r.height) * (y1 - y0)))
+        cv2.rectangle(image, a, b, (253, 254, 255), cv2.FILLED)  # hides one of the two tablets
+        return image
+
+    frames = [analyse(glare(s)) for s in range(3)]
+    assert all(f.observation.is_usable and f.observation.obscured == [cell(1, 2)] for f in frames)
+    result = VerificationEngine(LAYOUT, MODEL).evaluate(profile, [f.observation for f in frames])
+    verdict = result.verdict(cell(1, 2))
+    kinds = {f.kind for f in verdict.findings}
+    assert verdict.status == CompartmentStatus.NEEDS_REVIEW and FindingKind.VIEW_OBSCURED in kinds
+    assert FindingKind.MISSING not in kinds
+    assert all(v.status == CompartmentStatus.COUNT_MATCHED for v in result.compartments if v.compartment != cell(1, 2))
+
+
 def test_blur_and_darkness_are_rejected():
     image = STATION.render(full_scene(LAYOUT, TWO))
     assert CaptureIssue.BLURRY in assess(cv2.GaussianBlur(image, (0, 0), 6)).issues
@@ -117,6 +142,35 @@ def test_outline_finder_on_plain_card():
     assert find_by_outline(np.full((900, 1200), 30, np.uint8)) is None
     assert marker_sheet().shape == (1040, 1040)
     assert FinderMode("markers") == FinderMode.MARKERS
+
+
+def striped_card(card=(110, 40, 30), stripe=(200, 150, 90), background=(235, 235, 235)) -> np.ndarray:
+    """A dark blue card with lighter day bands and clear pockets, on a light bench (like real DAA cards)."""
+    image = np.full((1000, 750, 3), background, np.uint8)
+    cv2.rectangle(image, (70, 100), (700, 930), card, cv2.FILLED)
+    for row in range(7):
+        y = 140 + row * 112
+        if row % 2:
+            cv2.rectangle(image, (70, y), (700, y + 100), stripe, cv2.FILLED)
+        for column in range(4):
+            x = 140 + column * 140
+            cv2.rectangle(image, (x, y + 12), (x + 110, y + 88), (225, 228, 230), cv2.FILLED)
+    return image
+
+
+def test_outline_finder_on_a_dark_striped_card():
+    found = find_by_outline(striped_card())
+    assert found is not None and found.confidence >= 0.75
+    assert (found.quad.top_left.x, found.quad.top_left.y) == pytest.approx((70 / 750, 100 / 1000), abs=0.01)
+    assert (found.quad.bottom_right.x, found.quad.bottom_right.y) == pytest.approx((700 / 750, 930 / 1000), abs=0.01)
+
+
+def test_outline_finder_uses_colour_when_brightness_does_not_differ():
+    image = np.full((1000, 750, 3), 115, np.uint8)
+    cv2.rectangle(image, (70, 100), (700, 930), (230, 120, 60), cv2.FILLED)  # as bright as the bench, in grey
+    assert find_by_outline(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)) is None
+    found = find_by_outline(image)
+    assert found is not None and found.quad.bottom_right.y == pytest.approx(0.93, abs=0.01)
 
 
 def test_brain_learns_colours_with_classic_embedder_and_propagates():

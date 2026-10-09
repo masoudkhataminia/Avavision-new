@@ -15,13 +15,14 @@ from ..core.models import CompartmentIndex, PackLayout, cell
 from .codes import code_image
 from .pack_finder import MARKER_DICTIONARY, MARKER_IDS
 
-#: Colour (BGR), axes (px at 1920 wide) and shape of a few fictional medications.
+#: Colour (BGR), axes (px at 1920 wide) and shape of a few fictional medications. White tablets stay below
+#: clipping, as the station's exposure must keep them (see ``vision.quality``).
 PALETTE: dict[str, tuple[tuple[int, int, int], tuple[int, int], str]] = {
-    "metformin-500": ((235, 238, 240), (26, 14), "oval"),
-    "atorvastatin-20": ((250, 250, 250), (14, 14), "round"),
+    "metformin-500": ((232, 235, 237), (26, 14), "oval"),
+    "atorvastatin-20": ((238, 238, 238), (14, 14), "round"),
     "aspirin-100": ((70, 175, 235), (12, 12), "round"),
     "perindopril-5": ((120, 200, 120), (16, 10), "oval"),
-    "amlodipine-5": ((245, 245, 245), (24, 9), "capsule"),
+    "amlodipine-5": ((236, 236, 236), (24, 9), "capsule"),
     "warfarin-1": ((90, 120, 200), (11, 11), "round"),
 }
 

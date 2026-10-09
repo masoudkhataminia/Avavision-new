@@ -24,7 +24,7 @@ from ..core.physical import PhysicalFeatures, PhysicalRange, physical_evidence
 from .embedder import Embedder
 from .measure import measure_pill, millimetres_per_pixel
 from .pack_finder import FinderMode, Orientation, find_pack
-from .quality import QualityPolicy, assess
+from .quality import QualityPolicy, assess, obscured_compartments
 from .segmentation import PocketSegmenter, Rectified, rectify
 
 
@@ -72,7 +72,10 @@ class FrameAnalyzer:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         scale = min(1.0, self.locate_size / max(h, w))
         small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else gray
-        found = find_pack(small, self.mode, self.layout, self.orientation)
+        if self.mode == FinderMode.OUTLINE:  # the card may differ from the background only in colour
+            found = find_pack(image, self.mode, self.layout, self.orientation)
+        else:
+            found = find_pack(small, self.mode, self.layout, self.orientation)
         outcome: RegistrationOutcome = register(
             found.quad if found else None, found.confidence if found else 0.0, w, h, self.layout
         )
@@ -95,7 +98,8 @@ class FrameAnalyzer:
                 detections = self.detector.detect(frame.image)
             else:
                 detections = self.segmenter.detect(frame.rectified, self.layout)
-            frame.observation = frame.observation.model_copy(update={"detections": detections})
+            obscured = obscured_compartments(frame.rectified.canvas, self.layout, self.quality_policy)
+            frame.observation = frame.observation.model_copy(update={"detections": detections, "obscured": obscured})
         except Exception:  # a failed detection makes the frame unusable instead of guessing
             quality = frame.observation.quality.model_copy(
                 update={"issues": [*frame.observation.quality.issues, CaptureIssue.ANALYSIS_FAILED]}

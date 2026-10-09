@@ -60,6 +60,8 @@ class FindingKind(StrEnum):
     CONFLICTING_IDENTITY = "conflictingIdentity"
     ADVISOR_DISAGREES = "advisorDisagrees"  # an advisory second opinion saw something else; see core.advisory
     PHYSICAL_MISMATCH = "physicalMismatch"  # size or colour fits none of the expected medications; core.physical
+    VIEW_OBSCURED = "viewObscured"  # glare or a covering hides part of the compartment; its count proves nothing
+    PACK_NOT_SEEN = "packNotSeen"  # the camera found far too few doses in the whole pack; see DecisionPolicy
     NO_EXPECTATION = "noExpectation"
     LAYOUT_UNCALIBRATED = "layoutUncalibrated"
     NOT_EVALUATED = "notEvaluated"
@@ -134,6 +136,7 @@ class PackFindingKind(StrEnum):
     MODEL_UNAVAILABLE = "modelUnavailable"
     PROFILE_LAYOUT_MISMATCH = "profileLayoutMismatch"
     PACK_CARD_MISMATCH = "packCardMismatch"  # the camera saw another pack's header card; core.card
+    TOO_FEW_DOSES_SEEN = "tooFewDosesSeen"  # the detector is not seeing this pack; see DecisionPolicy
 
 
 class PackFinding(BaseModel):
@@ -184,6 +187,10 @@ class DecisionPolicy(BaseModel):
     minimum_detection_confidence: float = 0.6
     #: Fraction of verified compartments still inspected (at least one per pack when any is verified).
     spot_check_rate: float = 0.1
+    #: When fewer than this fraction of the doses the whole pack should hold are found, the detector is not
+    #: seeing the pack (on the first real photo the classic segmenter found none): a compartment that agrees,
+    #: such as an empty one expected empty, proves nothing then.
+    minimum_seen_fraction: float = 0.5
 
 
 class BrainContext(BaseModel):
@@ -282,12 +289,39 @@ class VerificationEngine:
         assignments = [
             assign(f.detections, f.registration.registration, self.layout, self.model.meaning) for f in window
         ]
-        verdicts = [self._verdict(i, profile.expectation(i), assignments) for i in self.layout.all_compartments]
+        obscured = {i for f in window for i in f.obscured}
+        verdicts = [
+            self._verdict(i, profile.expectation(i), assignments, i in obscured) for i in self.layout.all_compartments
+        ]
 
         pack_findings = []
+        expected_total = sum(v.expected_count or 0 for v in verdicts)
+        seen = sum(v.observed_count or 0 for v in verdicts)
+        if expected_total and seen < self.policy.minimum_seen_fraction * expected_total:
+            pack_findings.append(
+                PackFinding(kind=PackFindingKind.TOO_FEW_DOSES_SEEN, count=seen, required=expected_total)
+            )
+            accepted = (CompartmentStatus.VERIFIED, CompartmentStatus.COUNT_MATCHED)
+            verdicts = [
+                CompartmentVerdict.build(
+                    v.compartment,
+                    [*v.findings, finding(FindingKind.PACK_NOT_SEEN)],
+                    v.expected_count,
+                    v.observed_count,
+                    v.observed_medications,
+                )
+                if v.status in accepted
+                else v
+                for v in verdicts
+            ]
         outside = max(
             (
-                sum(1 for o in a.outside_grid if o.confidence >= self.policy.minimum_detection_confidence)
+                sum(
+                    1
+                    for o in a.outside_grid
+                    if o.confidence >= self.policy.minimum_detection_confidence
+                    and o.meaning.kind != MeaningKind.OBSCURED
+                )
                 for a in assignments
             ),
             default=0,
@@ -329,8 +363,13 @@ class VerificationEngine:
         return obj.meaning, False
 
     def _verdict(
-        self, index: CompartmentIndex, expectation: CompartmentExpectation | None, assignments: list[FrameAssignment]
+        self,
+        index: CompartmentIndex,
+        expectation: CompartmentExpectation | None,
+        assignments: list[FrameAssignment],
+        obscured: bool = False,
     ) -> CompartmentVerdict:
+        """``obscured``: a frame showed glare or a covering over this compartment (``FrameObservation.obscured``)."""
         expected = {k: v for k, v in (expectation.quantities if expectation else {}).items() if v > 0}
         findings: list[Finding] = []
         tallies: list[_Tally] = []
@@ -343,6 +382,9 @@ class VerificationEngine:
             tally = _Tally()
             low_here = conflicts_here = unrecognised_here = physical_here = 0
             for obj in a.inside.get(index, []):
+                if obj.meaning.kind == MeaningKind.OBSCURED:  # whatever its confidence
+                    obscured = True
+                    continue
                 if obj.confidence < self.policy.minimum_detection_confidence:
                     low_here += 1
                     continue
@@ -385,6 +427,8 @@ class VerificationEngine:
             findings.append(finding(FindingKind.UNRECOGNISED_PILL, count=unrecognised))
         if physical:
             findings.append(finding(FindingKind.PHYSICAL_MISMATCH, count=physical))
+        if obscured:
+            findings.append(finding(FindingKind.VIEW_OBSCURED))
 
         consensus = tallies[0] if tallies else None
         if consensus is None or any(t != consensus for t in tallies):
@@ -402,11 +446,12 @@ class VerificationEngine:
             return CompartmentVerdict.build(index, findings, None, consensus.doses, consensus.medications)
 
         # Low-confidence and border objects might be doses here: a count difference is certain only if
-        # they could not explain it. Otherwise the review findings above already apply.
+        # they could not explain it. Otherwise the review findings above already apply. Behind glare or a
+        # covering anything could hide (or glare could look like a tablet), so no count is certain there.
         expected_count = expectation.total_quantity
-        if consensus.doses + low + border < expected_count:
+        if not obscured and consensus.doses + low + border < expected_count:
             findings.append(finding(FindingKind.MISSING, expected=expected_count, observed=consensus.doses))
-        elif consensus.doses > expected_count:
+        elif not obscured and consensus.doses > expected_count:
             findings.append(finding(FindingKind.EXTRA, expected=expected_count, observed=consensus.doses))
         for medication, count in sorted(consensus.medications.items()):
             if medication not in expected:
@@ -415,7 +460,7 @@ class VerificationEngine:
         if self.has_identity_authority and consensus.generic == 0 and all(self.can_identify(m) for m in expected):
             for medication, quantity in sorted(expected.items()):
                 observed = consensus.medications.get(medication, 0)
-                if observed != quantity:
+                if observed != quantity and not obscured:
                     findings.append(
                         finding(
                             FindingKind.WRONG_QUANTITY, medication_id=medication, expected=quantity, observed=observed

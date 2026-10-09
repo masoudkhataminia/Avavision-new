@@ -40,6 +40,8 @@ def describe_finding(f: Finding, catalog: Catalog) -> str:
         FindingKind.CONFLICTING_IDENTITY: "the photos disagree about which medication this is",
         FindingKind.ADVISOR_DISAGREES: "the second opinion saw something different",
         FindingKind.PHYSICAL_MISMATCH: "a tablet whose size or colour matches none of the expected medications",
+        FindingKind.VIEW_OBSCURED: "glare or a covering hides part of this compartment",
+        FindingKind.PACK_NOT_SEEN: "the camera found far too few doses in the whole pack, so this count proves nothing",
         FindingKind.NO_EXPECTATION: "the profile does not say what belongs here",
         FindingKind.LAYOUT_UNCALIBRATED: "the pack layout is not calibrated",
         FindingKind.NOT_EVALUATED: "not evaluated",
@@ -59,6 +61,8 @@ def describe_pack_finding(f: PackFinding) -> str:
         PackFindingKind.OBJECTS_OUTSIDE_COMPARTMENTS: f"{f.count} object(s) outside the compartments",
         PackFindingKind.MODEL_UNAVAILABLE: "no detection model is available",
         PackFindingKind.PROFILE_LAYOUT_MISMATCH: "the profile belongs to a different pack layout",
+        PackFindingKind.TOO_FEW_DOSES_SEEN: f"the camera found only {f.count} of the {f.required} doses in the pack; "
+        "check the light and the camera, then check every compartment by eye",
         PackFindingKind.PACK_CARD_MISMATCH: "the header card in view is not this profile's card: " + ", ".join(f.codes),
     }
     return texts[f.kind]

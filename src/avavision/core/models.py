@@ -199,6 +199,24 @@ WEEKLY_7X4 = PackLayout(
     is_calibrated=False,
 )
 
+#: Portrait weekly card with the days down the side and the dose times across (as on many pharmacy-branded
+#: DAA cards). Grid position fitted to a real card's outline (D-132); size not yet measured, so uncalibrated.
+WEEKLY_7X4_PORTRAIT = PackLayout(
+    id="weekly-7x4-portrait",
+    display_name="Weekly pack, portrait · 7 days down × 4 times across",
+    rows=7,
+    columns=4,
+    row_labels=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    column_labels=["Morning", "Noon", "Evening", "Bedtime"],
+    width_mm=240,
+    height_mm=310,
+    grid_region=Rect(x=0.09, y=0.06, width=0.84, height=0.87),
+    border_band=0.08,
+    is_calibrated=False,
+)
+
+BUILTIN_LAYOUTS = (WEEKLY_7X4, WEEKLY_7X4_PORTRAIT)
+
 
 class ExpectedItem(BaseModel):
     medication_id: MedicationID

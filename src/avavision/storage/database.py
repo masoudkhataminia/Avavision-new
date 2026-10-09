@@ -23,7 +23,7 @@ from ..brain.learning import LabellingTask, PillSighting
 from ..brain.physical import PhysicalSample
 from ..brain.trust import TrustLedger, TrustPolicy
 from ..core.audit import GENESIS_HASH, AuditEntry, ChainDefect, CheckRecord, entry_hash, make_entry, verify_chain
-from ..core.models import WEEKLY_7X4, Catalog, CompartmentIndex, PackLayout, PackProfile
+from ..core.models import BUILTIN_LAYOUTS, Catalog, CompartmentIndex, PackLayout, PackProfile
 from ..core.physical import PhysicalFeatures
 
 SCHEMA = """
@@ -109,7 +109,8 @@ class Database:
         with self._lock:
             text = self._get("layouts")
         saved = {layout.id: layout for layout in (PackLayout.model_validate(d) for d in json.loads(text or "[]"))}
-        return [saved.get(WEEKLY_7X4.id, WEEKLY_7X4), *(v for k, v in saved.items() if k != WEEKLY_7X4.id)]
+        builtin = [saved.get(layout.id, layout) for layout in BUILTIN_LAYOUTS]
+        return [*builtin, *(v for k, v in saved.items() if k not in {layout.id for layout in BUILTIN_LAYOUTS})]
 
     def save_layout(self, layout: PackLayout) -> None:
         layouts = {lay.id: lay for lay in self.layouts()}
