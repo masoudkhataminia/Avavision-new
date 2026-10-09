@@ -78,7 +78,7 @@ public struct CheckSession: Sendable, Identifiable {
   /// Validates the pharmacist's decision and produces the record for the audit trail.
   public mutating func complete(
     with signOff: PharmacistSignOff, appVersion: String, deviceIdentifier: String, model: ModelSummary?,
-    at date: Date = Date()
+    brain: BrainSummary? = nil, at date: Date = Date()
   ) throws -> CheckRecord {
     guard phase == .analyzed, let result else { throw SessionError.wrongPhase(phase) }
     do {
@@ -95,6 +95,7 @@ public struct CheckSession: Sendable, Identifiable {
       layout: layout,
       profile: profile,
       model: model,
+      brain: brain,
       result: result,
       signOff: signOff,
       frameImageSHA256s: frames.compactMap(\.imageSHA256)

@@ -2,8 +2,11 @@ import Foundation
 
 /// A detection after label resolution and mapping into pack coordinates.
 public struct PlacedObject: Hashable, Sendable {
+  /// Position of the detection in the frame's `detections`.
+  public var detectionIndex: Int
   public var meaning: LabelMeaning
   public var confidence: Double
+  public var identity: IdentityEvidence?
   /// `nil` when the point could not be mapped onto the pack plane.
   public var packCenter: Point2D?
   public var location: CellLocation
@@ -28,19 +31,20 @@ public enum CompartmentAssigner {
     meaning: (String) -> LabelMeaning
   ) -> FrameAssignment {
     var assignment = FrameAssignment()
-    for detection in detections {
+    for (detectionIndex, detection) in detections.enumerated() {
       let resolved = meaning(detection.label)
       if resolved == .ignore { continue }
       guard let center = registration.imageToPack.apply(detection.boundingBox.center) else {
         assignment.outsideGrid.append(
           PlacedObject(
-            meaning: resolved, confidence: detection.confidence,
-            packCenter: nil, location: .outsideGrid))
+            detectionIndex: detectionIndex, meaning: resolved, confidence: detection.confidence,
+            identity: detection.identity, packCenter: nil, location: .outsideGrid))
         continue
       }
       let location = layout.locate(center)
       let object = PlacedObject(
-        meaning: resolved, confidence: detection.confidence, packCenter: center, location: location)
+        detectionIndex: detectionIndex, meaning: resolved, confidence: detection.confidence,
+        identity: detection.identity, packCenter: center, location: location)
       switch location {
       case .inside(let index):
         assignment.inside[index, default: []].append(object)
@@ -51,5 +55,24 @@ public enum CompartmentAssigner {
       }
     }
     return assignment
+  }
+
+  /// Confident whole doses clearly inside one compartment, keyed by detection index.
+  /// These are the pills the brain may learn from once a pharmacist confirms the compartment.
+  public static func pillCompartments(
+    in frame: FrameObservation, layout: PackLayout, minimumConfidence: Double, meaning: (String) -> LabelMeaning
+  ) -> [Int: CompartmentIndex] {
+    guard let registration = frame.registration.registration else { return [:] }
+    let assignment = assign(frame.detections, registration: registration, layout: layout, meaning: meaning)
+    var result: [Int: CompartmentIndex] = [:]
+    for (index, objects) in assignment.inside {
+      for object in objects where object.confidence >= minimumConfidence {
+        switch object.meaning {
+        case .pill, .medication: result[object.detectionIndex] = index
+        case .broken, .foreign, .ignore: break
+        }
+      }
+    }
+    return result
   }
 }

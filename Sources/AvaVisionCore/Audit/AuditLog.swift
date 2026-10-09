@@ -26,14 +26,15 @@ public struct CheckRecord: Codable, Hashable, Sendable, Identifiable {
   public var layout: PackLayout
   public var profile: PackProfile
   public var model: ModelSummary?
+  public var brain: BrainSummary?
   public var result: PackVerificationResult
   public var signOff: PharmacistSignOff
   public var frameImageSHA256s: [String]
 
   public init(
     id: UUID = UUID(), createdAt: Date = Date(), appVersion: String, deviceIdentifier: String,
-    layout: PackLayout, profile: PackProfile, model: ModelSummary?, result: PackVerificationResult,
-    signOff: PharmacistSignOff, frameImageSHA256s: [String]
+    layout: PackLayout, profile: PackProfile, model: ModelSummary?, brain: BrainSummary? = nil,
+    result: PackVerificationResult, signOff: PharmacistSignOff, frameImageSHA256s: [String]
   ) {
     self.id = id
     self.createdAt = createdAt
@@ -42,6 +43,7 @@ public struct CheckRecord: Codable, Hashable, Sendable, Identifiable {
     self.layout = layout
     self.profile = profile
     self.model = model
+    self.brain = brain
     self.result = result
     self.signOff = signOff
     self.frameImageSHA256s = frameImageSHA256s

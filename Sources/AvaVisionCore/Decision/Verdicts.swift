@@ -37,6 +37,12 @@ public enum Finding: Codable, Hashable, Sendable {
   case objectOnBorder(count: Int)
   case unstableAcrossFrames
   case identityNotVerified
+  /// The brain thinks a pill looks like this medication, which is not expected here.
+  case suspectedMedication(MedicationID)
+  /// The brain knows every expected medication well, and these pills look like none of them.
+  case unrecognisedPill(count: Int)
+  /// The detection model and the brain named different medications for the same pill.
+  case conflictingIdentity(count: Int)
   case noExpectation
   case layoutUncalibrated
   case notEvaluated
@@ -47,7 +53,7 @@ public enum Finding: Codable, Hashable, Sendable {
     case .missing, .extra, .wrongQuantity, .unexpectedMedication, .brokenDose, .foreignObject:
       .mismatch
     case .lowConfidenceObject, .objectOnBorder, .unstableAcrossFrames, .noExpectation, .layoutUncalibrated,
-      .notEvaluated:
+      .notEvaluated, .suspectedMedication, .unrecognisedPill, .conflictingIdentity:
       .needsReview
     case .identityNotVerified:
       .countMatched
@@ -117,15 +123,20 @@ public struct PackVerificationResult: Codable, Hashable, Sendable, Identifiable 
   public var modelID: String?
   public var modelVersion: String?
   public var capability: ModelCapability
+  /// Medications the brain was trusted to identify for this check.
+  public var trustedMedications: [MedicationID]
   public var status: PackStatus
   public var packFindings: [PackFinding]
   public var compartments: [CompartmentVerdict]
+  /// Verified compartments chosen at random for mandatory pharmacist inspection.
+  public var spotChecks: [CompartmentIndex]
   public var usableFrameCount: Int
 
   public init(
     id: UUID = UUID(), evaluatedAt: Date, layoutID: String, profileID: UUID, modelID: String?,
-    modelVersion: String?, capability: ModelCapability, status: PackStatus, packFindings: [PackFinding],
-    compartments: [CompartmentVerdict], usableFrameCount: Int
+    modelVersion: String?, capability: ModelCapability, trustedMedications: [MedicationID] = [],
+    status: PackStatus, packFindings: [PackFinding], compartments: [CompartmentVerdict],
+    spotChecks: [CompartmentIndex] = [], usableFrameCount: Int
   ) {
     self.id = id
     self.evaluatedAt = evaluatedAt
@@ -134,9 +145,11 @@ public struct PackVerificationResult: Codable, Hashable, Sendable, Identifiable 
     self.modelID = modelID
     self.modelVersion = modelVersion
     self.capability = capability
+    self.trustedMedications = trustedMedications
     self.status = status
     self.packFindings = packFindings
     self.compartments = compartments
+    self.spotChecks = spotChecks
     self.usableFrameCount = usableFrameCount
   }
 
@@ -144,8 +157,9 @@ public struct PackVerificationResult: Codable, Hashable, Sendable, Identifiable 
     compartments.first { $0.compartment == index }
   }
 
-  /// Compartments a pharmacist must inspect before the pack can be released.
+  /// Compartments a pharmacist must inspect before the pack can be released: everything not
+  /// verified, plus the random spot checks.
   public var compartmentsRequiringReview: [CompartmentIndex] {
-    compartments.filter { $0.status != .verified }.map(\.compartment)
+    compartments.filter { $0.status != .verified || spotChecks.contains($0.compartment) }.map(\.compartment)
   }
 }

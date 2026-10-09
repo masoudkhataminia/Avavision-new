@@ -6,45 +6,80 @@ public struct DecisionPolicy: Codable, Hashable, Sendable {
   public var requiredConsistentFrames: Int
   /// Detections below this confidence are never counted; they send the compartment to review.
   public var minimumDetectionConfidence: Double
+  /// Fraction of automatically verified compartments a pharmacist must still inspect, so the
+  /// system's accuracy keeps being measured. At least one per pack when any compartment is verified.
+  public var spotCheckRate: Double
 
-  public init(requiredConsistentFrames: Int, minimumDetectionConfidence: Double) {
+  public init(requiredConsistentFrames: Int, minimumDetectionConfidence: Double, spotCheckRate: Double) {
     self.requiredConsistentFrames = requiredConsistentFrames
     self.minimumDetectionConfidence = minimumDetectionConfidence
+    self.spotCheckRate = spotCheckRate
   }
 
-  public static let standard = DecisionPolicy(requiredConsistentFrames: 3, minimumDetectionConfidence: 0.6)
+  public static let standard = DecisionPolicy(
+    requiredConsistentFrames: 3, minimumDetectionConfidence: 0.6, spotCheckRate: 0.1)
+}
+
+/// What the learning brain contributes to a decision.
+public struct BrainContext: Hashable, Sendable {
+  /// Medications whose identification has earned trust (see `TrustLedger`).
+  public var trustedMedications: Set<MedicationID>
+  /// Medications the brain knows well enough to notice a pill that is none of them.
+  public var wellKnownMedications: Set<MedicationID>
+
+  public init(trustedMedications: Set<MedicationID>, wellKnownMedications: Set<MedicationID>) {
+    self.trustedMedications = trustedMedications
+    self.wellKnownMedications = wellKnownMedications
+  }
+
+  public init(_ brain: BrainState) {
+    self.init(trustedMedications: brain.trustedMedications, wellKnownMedications: brain.wellKnownMedications)
+  }
 }
 
 /// Compares the observed pack against its expected profile.
 ///
 /// Safety rules (see docs): weak, missing or conflicting evidence never produces an accepted
-/// result; `verified` additionally requires a released model that covers every expected medication.
+/// result; `verified` additionally requires identity authority (a released model or earned brain
+/// trust) for every expected medication. The brain can always escalate, never relax.
 public struct VerificationEngine: Sendable {
   public var layout: PackLayout
   public var model: ActiveModel?
+  public var brain: BrainContext?
   public var policy: DecisionPolicy
 
-  public init(layout: PackLayout, model: ActiveModel?, policy: DecisionPolicy = .standard) {
+  public init(layout: PackLayout, model: ActiveModel?, brain: BrainContext? = nil, policy: DecisionPolicy = .standard) {
     self.layout = layout
     self.model = model
+    self.brain = brain
     self.policy = policy
   }
 
+  /// True when the medication may be counted by identity.
+  func canIdentify(_ id: MedicationID) -> Bool {
+    (model?.capability.canIdentify(id) ?? false) || (brain?.trustedMedications.contains(id) ?? false)
+  }
+
+  var hasIdentityAuthority: Bool {
+    if case .identity = model?.capability { return true }
+    return !(brain?.trustedMedications.isEmpty ?? true)
+  }
+
   public func evaluate(
-    profile: PackProfile, frames: [FrameObservation], evaluatedAt: Date = Date()
+    profile: PackProfile, frames: [FrameObservation], evaluatedAt: Date = Date(), resultID: UUID = UUID()
   ) -> PackVerificationResult {
     let required = max(1, policy.requiredConsistentFrames)
     let usable = frames.filter(\.isUsable)
 
     func unevaluated(_ status: PackStatus, _ findings: [PackFinding]) -> PackVerificationResult {
       makeResult(
-        profile: profile, status: status, findings: findings,
+        id: resultID, profile: profile, status: status, findings: findings,
         compartments: layout.allCompartments.map {
           CompartmentVerdict(
             compartment: $0, findings: [.notEvaluated],
             expectedCount: profile.expectation(for: $0)?.totalQuantity, observedCount: nil)
         },
-        usableFrameCount: usable.count, evaluatedAt: evaluatedAt)
+        spotChecks: [], usableFrameCount: usable.count, evaluatedAt: evaluatedAt)
     }
 
     guard let model, model.capability.canCount else {
@@ -77,9 +112,7 @@ public struct VerificationEngine: Sendable {
     }
 
     let compartments = layout.allCompartments.map {
-      verdict(
-        for: $0, expectation: profile.expectation(for: $0), assignments: assignments,
-        capability: model.capability)
+      verdict(for: $0, expectation: profile.expectation(for: $0), assignments: assignments)
     }
 
     var findings: [PackFinding] = []
@@ -94,8 +127,19 @@ public struct VerificationEngine: Sendable {
       status = .needsReview
     }
     return makeResult(
-      profile: profile, status: status, findings: findings, compartments: compartments,
-      usableFrameCount: usable.count, evaluatedAt: evaluatedAt)
+      id: resultID, profile: profile, status: status, findings: findings, compartments: compartments,
+      spotChecks: spotChecks(among: compartments, seed: resultID), usableFrameCount: usable.count,
+      evaluatedAt: evaluatedAt)
+  }
+
+  /// Deterministic per result, so the audit record can show why each spot check was chosen.
+  private func spotChecks(among compartments: [CompartmentVerdict], seed: UUID) -> [CompartmentIndex] {
+    let verified = compartments.filter { $0.status == .verified }.map(\.compartment)
+    guard !verified.isEmpty, policy.spotCheckRate > 0 else { return [] }
+    var generator = SeededGenerator(seed: seed)
+    var chosen = verified.filter { _ in Double.random(in: 0..<1, using: &generator) < policy.spotCheckRate }
+    if chosen.isEmpty, let any = verified.randomElement(using: &generator) { chosen = [any] }
+    return chosen.sorted()
   }
 
   private struct Tally: Equatable {
@@ -107,24 +151,54 @@ public struct VerificationEngine: Sendable {
     var doses: Int { generic + medications.values.reduce(0, +) }
   }
 
+  /// Final meaning of an object once the brain's trusted identification is taken into account.
+  private func resolvedMeaning(_ object: PlacedObject) -> (meaning: LabelMeaning, conflict: Bool) {
+    let named = object.identity?.decision.medicationID.flatMap { canIdentify($0) ? $0 : nil }
+    switch object.meaning {
+    case .pill:
+      return (named.map(LabelMeaning.medication) ?? .pill, false)
+    case .medication(let id):
+      if let named, named != id { return (.pill, true) }
+      return (object.meaning, false)
+    case .broken, .foreign, .ignore:
+      return (object.meaning, false)
+    }
+  }
+
   private func verdict(
-    for index: CompartmentIndex, expectation: CompartmentExpectation?, assignments: [FrameAssignment],
-    capability: ModelCapability
+    for index: CompartmentIndex, expectation: CompartmentExpectation?, assignments: [FrameAssignment]
   ) -> CompartmentVerdict {
+    let expected = expectation?.quantities.filter { $0.value > 0 } ?? [:]
     var findings: [Finding] = []
     var tallies: [Tally] = []
     var lowConfidence = 0
     var onBorder = 0
+    var conflicts = 0
+    var suspected: Set<MedicationID> = []
+    var unrecognised = 0
+    let noticesStrangers =
+      !expected.isEmpty && expected.keys.allSatisfy { brain?.wellKnownMedications.contains($0) ?? false }
+
     for assignment in assignments {
       var tally = Tally()
       var low = 0
+      var conflictsInFrame = 0
+      var unrecognisedInFrame = 0
       for object in assignment.inside[index] ?? [] {
         guard object.confidence >= policy.minimumDetectionConfidence else {
           low += 1
           continue
         }
-        switch object.meaning {
-        case .pill: tally.generic += 1
+        let (meaning, conflict) = resolvedMeaning(object)
+        if conflict { conflictsInFrame += 1 }
+        switch meaning {
+        case .pill:
+          tally.generic += 1
+          switch object.identity?.decision {
+          case .identified(let id) where expected[id] == nil: suspected.insert(id)
+          case .unrecognised where noticesStrangers: unrecognisedInFrame += 1
+          default: break
+          }
         case .medication(let id): tally.medications[id, default: 0] += 1
         case .broken: tally.broken += 1
         case .foreign: tally.foreign += 1
@@ -134,11 +208,16 @@ public struct VerificationEngine: Sendable {
       tallies.append(tally)
       lowConfidence = max(lowConfidence, low)
       onBorder = max(onBorder, assignment.ambiguous[index]?.count ?? 0)
+      conflicts = max(conflicts, conflictsInFrame)
+      unrecognised = max(unrecognised, unrecognisedInFrame)
     }
 
     if lowConfidence > 0 { findings.append(.lowConfidenceObject(count: lowConfidence)) }
     if onBorder > 0 { findings.append(.objectOnBorder(count: onBorder)) }
     if !layout.isCalibrated { findings.append(.layoutUncalibrated) }
+    if conflicts > 0 { findings.append(.conflictingIdentity(count: conflicts)) }
+    for id in suspected.sorted() { findings.append(.suspectedMedication(id)) }
+    if unrecognised > 0 { findings.append(.unrecognisedPill(count: unrecognised)) }
 
     guard let consensus = tallies.first, tallies.allSatisfy({ $0 == consensus }) else {
       findings.append(.unstableAcrossFrames)
@@ -164,15 +243,12 @@ public struct VerificationEngine: Sendable {
       findings.append(.extra(expected: expectedCount, observed: consensus.doses))
     }
 
-    let expected = expectation.quantities
     for (id, count) in consensus.medications.sorted(by: { $0.key < $1.key }) where expected[id] == nil {
       findings.append(.unexpectedMedication(id, observed: count))
     }
 
-    var identityCovered = false
-    if case .identity = capability {
-      identityCovered = consensus.generic == 0 && expected.keys.allSatisfy(capability.canIdentify)
-    }
+    let identityCovered =
+      hasIdentityAuthority && consensus.generic == 0 && expected.keys.allSatisfy(canIdentify)
     if identityCovered {
       for (id, quantity) in expected.sorted(by: { $0.key < $1.key }) {
         let observed = consensus.medications[id] ?? 0
@@ -190,20 +266,41 @@ public struct VerificationEngine: Sendable {
   }
 
   private func makeResult(
-    profile: PackProfile, status: PackStatus, findings: [PackFinding], compartments: [CompartmentVerdict],
-    usableFrameCount: Int, evaluatedAt: Date
+    id: UUID, profile: PackProfile, status: PackStatus, findings: [PackFinding], compartments: [CompartmentVerdict],
+    spotChecks: [CompartmentIndex], usableFrameCount: Int, evaluatedAt: Date
   ) -> PackVerificationResult {
     PackVerificationResult(
+      id: id,
       evaluatedAt: evaluatedAt,
       layoutID: layout.id,
       profileID: profile.id,
       modelID: model?.manifest.modelID,
       modelVersion: model?.manifest.version,
       capability: model?.capability ?? .unavailable,
+      trustedMedications: (brain?.trustedMedications).map { $0.sorted() } ?? [],
       status: status,
       packFindings: findings,
       compartments: compartments,
+      spotChecks: spotChecks,
       usableFrameCount: usableFrameCount
     )
+  }
+}
+
+/// Small deterministic generator (SplitMix64) seeded from a UUID.
+struct SeededGenerator: RandomNumberGenerator {
+  private var state: UInt64
+
+  init(seed: UUID) {
+    let bytes = withUnsafeBytes(of: seed.uuid) { Array($0) }
+    state = bytes.prefix(8).reduce(0) { $0 << 8 | UInt64($1) } ^ bytes.suffix(8).reduce(0) { $0 << 8 | UInt64($1) }
+  }
+
+  mutating func next() -> UInt64 {
+    state &+= 0x9E37_79B9_7F4A_7C15
+    var z = state
+    z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+    z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+    return z ^ (z >> 31)
   }
 }

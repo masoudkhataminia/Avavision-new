@@ -215,7 +215,28 @@ final class VerificationEngineTests: XCTestCase {
     XCTAssertEqual(result.verdict(for: target)?.findings, [])
     XCTAssertEqual(result.verdict(for: target)?.observedMedications, [Fixtures.metformin: 1, Fixtures.atorvastatin: 1])
     XCTAssertEqual(result.status, .verified)
-    XCTAssertEqual(result.compartmentsRequiringReview, [])
+    XCTAssertFalse(result.spotChecks.isEmpty)
+    XCTAssertEqual(result.compartmentsRequiringReview, result.spotChecks)
+
+    var noSpotChecks = identityEngine
+    noSpotChecks.policy.spotCheckRate = 0
+    let unchecked = evaluate(detections, profile: identityProfile, engine: noSpotChecks)
+    XCTAssertEqual(unchecked.compartmentsRequiringReview, [])
+  }
+
+  func testSpotChecksAreDeterministicPerResult() {
+    let cell = Fixtures.layout.cellRect(target)
+    let detections = [
+      Fixtures.detection("metformin", at: Point2D(x: cell.center.x - 0.03, y: cell.center.y)),
+      Fixtures.detection("atorvastatin", at: Point2D(x: cell.center.x + 0.03, y: cell.center.y)),
+    ]
+    let id = UUID()
+    let frames = Fixtures.frames(detections)
+    let first = identityEngine.evaluate(profile: identityProfile, frames: frames, resultID: id)
+    let second = identityEngine.evaluate(profile: identityProfile, frames: frames, resultID: id)
+    XCTAssertEqual(first.spotChecks, second.spotChecks)
+    XCTAssertEqual(first.id, id)
+    XCTAssertTrue(first.spotChecks.allSatisfy { first.verdict(for: $0)?.status == .verified })
   }
 
   func testWrongMedicationWithRightCountIsMismatch() {
@@ -259,5 +280,117 @@ final class VerificationEngineTests: XCTestCase {
     XCTAssertEqual(verdict?.status, .countMatched)
     XCTAssertEqual(verdict?.findings, [.identityNotVerified])
     XCTAssertEqual(verdict?.observedMedications, [Fixtures.metformin: 1])
+  }
+
+  // MARK: - Brain
+
+  private func withIdentity(_ detection: Detection, _ decision: IdentityDecision) -> Detection {
+    var copy = detection
+    copy.identity = IdentityEvidence(embedderID: "e", policyVersion: 1, decision: decision, candidates: [])
+    return copy
+  }
+
+  private func brainEngine(trusted: Set<MedicationID>, wellKnown: Set<MedicationID> = []) -> VerificationEngine {
+    VerificationEngine(
+      layout: Fixtures.layout, model: Fixtures.countOnlyModel,
+      brain: BrainContext(trustedMedications: trusted, wellKnownMedications: wellKnown))
+  }
+
+  private var singleMetforminProfile: PackProfile {
+    Fixtures.profile(default: [], overrides: [target: one])
+  }
+
+  private func pillInTarget(_ decision: IdentityDecision) -> [Detection] {
+    Fixtures.detections("pill", count: 1, in: target).map { withIdentity($0, decision) }
+  }
+
+  func testTrustedBrainIdentityVerifiesWithCountOnlyModel() {
+    let result = evaluate(
+      pillInTarget(.identified(Fixtures.metformin)), profile: singleMetforminProfile,
+      engine: brainEngine(trusted: [Fixtures.metformin]))
+    XCTAssertEqual(result.verdict(for: target)?.status, .verified)
+    XCTAssertEqual(result.verdict(for: target)?.observedMedications, [Fixtures.metformin: 1])
+    XCTAssertEqual(result.trustedMedications, [Fixtures.metformin])
+  }
+
+  func testUntrustedBrainIdentityNeverVerifies() {
+    let result = evaluate(
+      pillInTarget(.identified(Fixtures.metformin)), profile: singleMetforminProfile,
+      engine: brainEngine(trusted: []))
+    XCTAssertEqual(result.verdict(for: target)?.status, .countMatched)
+    XCTAssertEqual(result.verdict(for: target)?.observedMedications, [:])
+  }
+
+  func testBrainEscalatesSuspectedUnexpectedMedicationFromDayOne() {
+    let result = evaluate(
+      pillInTarget(.identified(Fixtures.aspirin)), profile: singleMetforminProfile, engine: brainEngine(trusted: []))
+    let verdict = result.verdict(for: target)
+    XCTAssertEqual(verdict?.status, .needsReview)
+    XCTAssertTrue(verdict?.findings.contains(.suspectedMedication(Fixtures.aspirin)) == true)
+  }
+
+  func testTrustedBrainCatchesWrongMedication() {
+    let result = evaluate(
+      pillInTarget(.identified(Fixtures.aspirin)), profile: singleMetforminProfile,
+      engine: brainEngine(trusted: [Fixtures.metformin, Fixtures.aspirin]))
+    let verdict = result.verdict(for: target)
+    XCTAssertEqual(verdict?.status, .mismatch)
+    XCTAssertTrue(verdict?.findings.contains(.unexpectedMedication(Fixtures.aspirin, observed: 1)) == true)
+    XCTAssertTrue(verdict?.findings.contains(.wrongQuantity(Fixtures.metformin, expected: 1, observed: 0)) == true)
+  }
+
+  func testUnrecognisedPillIsFlaggedOnlyWhenExpectedMedicationsAreWellKnown() {
+    let flagged = evaluate(
+      pillInTarget(.unrecognised), profile: singleMetforminProfile,
+      engine: brainEngine(trusted: [], wellKnown: [Fixtures.metformin]))
+    XCTAssertTrue(flagged.verdict(for: target)?.findings.contains(.unrecognisedPill(count: 1)) == true)
+    XCTAssertEqual(flagged.verdict(for: target)?.status, .needsReview)
+
+    let quiet = evaluate(pillInTarget(.unrecognised), profile: singleMetforminProfile, engine: brainEngine(trusted: []))
+    XCTAssertEqual(quiet.verdict(for: target)?.status, .countMatched)
+  }
+
+  func testModelAndBrainDisagreementGoesToReview() {
+    let model = Fixtures.identityModel([Fixtures.metformin, Fixtures.aspirin])
+    let engine = VerificationEngine(
+      layout: Fixtures.layout, model: model,
+      brain: BrainContext(trustedMedications: [Fixtures.aspirin], wellKnownMedications: []))
+    let detections = Fixtures.detections("metformin", count: 1, in: target).map {
+      withIdentity($0, .identified(Fixtures.aspirin))
+    }
+    let verdict = evaluate(detections, profile: singleMetforminProfile, engine: engine).verdict(for: target)
+    XCTAssertTrue(verdict?.findings.contains(.conflictingIdentity(count: 1)) == true)
+    XCTAssertNotEqual(verdict?.status, .verified)
+  }
+
+  func testPartialTrustLeavesCompartmentUnverified() {
+    let profile = Fixtures.profile(default: [], overrides: [target: identityProfile.expectation(for: target)!.items])
+    let cell = Fixtures.layout.cellRect(target)
+    let detections = [
+      withIdentity(
+        Fixtures.detection("pill", at: Point2D(x: cell.center.x - 0.03, y: cell.center.y)),
+        .identified(Fixtures.metformin)),
+      withIdentity(
+        Fixtures.detection("pill", at: Point2D(x: cell.center.x + 0.03, y: cell.center.y)),
+        .identified(Fixtures.atorvastatin)),
+    ]
+    let verdict = evaluate(detections, profile: profile, engine: brainEngine(trusted: [Fixtures.metformin]))
+      .verdict(for: target)
+    XCTAssertEqual(verdict?.status, .countMatched)
+    XCTAssertEqual(verdict?.observedMedications, [Fixtures.metformin: 1])
+  }
+
+  func testPillCompartmentsListsConfidentDosesClearlyInside() {
+    let cell = Fixtures.layout.cellRect(target)
+    let detections = [
+      Fixtures.detection("pill", at: cell.center),
+      Fixtures.detection("pill", at: Point2D(x: cell.center.x, y: cell.center.y + 0.01), confidence: 0.3),
+      Fixtures.detection("foreign", at: cell.center),
+      Fixtures.detection("pill", at: Point2D(x: cell.maxX - 0.005, y: cell.center.y)),
+    ]
+    let map = CompartmentAssigner.pillCompartments(
+      in: Fixtures.frame(detections), layout: Fixtures.layout, minimumConfidence: 0.6,
+      meaning: Fixtures.countOnlyModel.meaning(of:))
+    XCTAssertEqual(map, [0: target])
   }
 }

@@ -63,11 +63,14 @@ public struct Detection: Codable, Hashable, Sendable {
   public var confidence: Double
   /// Bounding box in normalized image coordinates (origin top-left).
   public var boundingBox: Rect2D
+  /// The brain's opinion of what this object is, when it was asked.
+  public var identity: IdentityEvidence?
 
-  public init(label: String, confidence: Double, boundingBox: Rect2D) {
+  public init(label: String, confidence: Double, boundingBox: Rect2D, identity: IdentityEvidence? = nil) {
     self.label = label
     self.confidence = confidence
     self.boundingBox = boundingBox
+    self.identity = identity
   }
 }
 
