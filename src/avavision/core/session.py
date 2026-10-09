@@ -6,6 +6,7 @@ import uuid
 from enum import StrEnum
 
 from ..brain.brain import BrainSummary
+from .advisory import AdvisoryOpinion, apply_advisories
 from .audit import CheckRecord, ModelSummary
 from .engine import VerificationEngine, VerificationResult
 from .models import Catalog, PackLayout, PackProfile
@@ -39,6 +40,7 @@ class CheckSession:
         self.phase = Phase.CAPTURING
         self.frames: list[FrameObservation] = []
         self.result: VerificationResult | None = None
+        self.advisories: list[AdvisoryOpinion] = []
         self.sign_off: SignOff | None = None
 
     @property
@@ -58,11 +60,23 @@ class CheckSession:
         self.phase = Phase.ANALYZED
         return self.result
 
+    def advise(self, opinions: list[AdvisoryOpinion]) -> VerificationResult:
+        """Records second opinions before sign-off; disagreements escalate the result to review."""
+        if self.phase != Phase.ANALYZED or self.result is None:
+            raise SessionError(f"cannot take advice in phase {self.phase}")
+        unknown = [o.compartment for o in opinions if not self.layout.contains(o.compartment)]
+        if unknown:
+            raise SessionError(f"opinions outside the layout: {unknown}")
+        self.advisories.extend(opinions)
+        self.result = apply_advisories(self.result, opinions)
+        return self.result
+
     def retake(self) -> None:
         if self.phase != Phase.ANALYZED:
             raise SessionError(f"cannot retake in phase {self.phase}")
         self.frames.clear()
         self.result = None
+        self.advisories = []
         self.phase = Phase.CAPTURING
 
     def complete(
@@ -90,4 +104,5 @@ class CheckSession:
             sign_off=sign_off,
             frame_image_sha256s=[f.image_sha256 for f in self.frames if f.image_sha256],
             evidence_images=evidence_images or [],
+            advisories=self.advisories,
         )

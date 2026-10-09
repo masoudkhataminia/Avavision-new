@@ -57,6 +57,7 @@ class FindingKind(StrEnum):
     SUSPECTED_MEDICATION = "suspectedMedication"
     UNRECOGNISED_PILL = "unrecognisedPill"
     CONFLICTING_IDENTITY = "conflictingIdentity"
+    ADVISOR_DISAGREES = "advisorDisagrees"  # an advisory second opinion saw something else; see core.advisory
     NO_EXPECTATION = "noExpectation"
     LAYOUT_UNCALIBRATED = "layoutUncalibrated"
     NOT_EVALUATED = "notEvaluated"

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pydantic import BaseModel, Field
 
 from ..brain.brain import BrainSummary
+from .advisory import AdvisoryOpinion
 from .engine import VerificationResult
 from .gate import ActiveModel, ModelCapability, ModelStage
 from .models import PackLayout, PackProfile
@@ -52,6 +53,8 @@ class CheckRecord(BaseModel):
     frame_image_sha256s: list[str] = []
     #: Stored evidence images (relative paths), when image retention is enabled.
     evidence_images: list[str] = []
+    #: Advisory second opinions received before sign-off (they can only have escalated the result).
+    advisories: list[AdvisoryOpinion] = []
 
 
 class AuditEntry(BaseModel):

@@ -140,6 +140,19 @@ def pill_crop(rectified: Rectified, box: Rect, padding: float = 0.2) -> np.ndarr
     return canvas[b:d, a:c].copy() if c - a >= 4 and d - b >= 4 else None
 
 
+def compartment_crop(
+    rectified: Rectified, layout: PackLayout, index: CompartmentIndex, margin: float = 0.15
+) -> np.ndarray:
+    """One compartment of the perspective-corrected pack, with a margin of its neighbours for context."""
+    rect = layout.cell_rect(index)
+    canvas = rectified.canvas
+    h, w = canvas.shape[:2]
+    dx, dy = rect.width * margin, rect.height * margin
+    x0, y0 = max(0, int((rect.x - dx) * w)), max(0, int((rect.y - dy) * h))
+    x1, y1 = min(w, int((rect.max_x + dx) * w)), min(h, int((rect.max_y + dy) * h))
+    return canvas[y0:y1, x0:x1].copy()
+
+
 def _ms(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 2)
 
