@@ -47,7 +47,10 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         INFOPLIST_KEY_CFBundleDisplayName: AvaVision
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.medical
-        INFOPLIST_KEY_NSCameraUsageDescription: AvaVision uses the camera to photograph medication packs so a pharmacist can check them.
+        INFOPLIST_KEY_NSCameraUsageDescription: AvaVision uses the camera to photograph medication packs and pills so a pharmacist can check them and teach the app.
+        # Exported training data appears in the Files app under On My iPhone › AvaVision.
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait

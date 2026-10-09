@@ -236,8 +236,11 @@ public struct VerificationEngine: Sendable {
         observedMedications: consensus.medications)
     }
 
+    // Low-confidence and border objects might be doses of this compartment: a count difference is only
+    // certain when they could not explain it. Otherwise the review findings above already apply.
     let expectedCount = expectation.totalQuantity
-    if consensus.doses < expectedCount {
+    let possible = consensus.doses + lowConfidence + onBorder
+    if possible < expectedCount {
       findings.append(.missing(expected: expectedCount, observed: consensus.doses))
     } else if consensus.doses > expectedCount {
       findings.append(.extra(expected: expectedCount, observed: consensus.doses))

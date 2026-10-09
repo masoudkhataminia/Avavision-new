@@ -21,6 +21,14 @@ struct HomeView: View {
         .disabled(!app.isLoaded)
       }
 
+      Section("Learning") {
+        NavigationLink {
+          BrainView()
+        } label: {
+          BrainStatusRow()
+        }
+      }
+
       Section("Set up") {
         NavigationLink {
           ProfileListView()
@@ -66,6 +74,28 @@ enum SafetyText {
     + "and signed off by a pharmacist, and anything uncertain is always sent to review."
 }
 
+struct BrainStatusRow: View {
+  @Environment(AppModel.self) private var app
+
+  var body: some View {
+    let brain = app.brain
+    Label {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Brain").font(.subheadline.bold())
+        Text(
+          "\(brain?.knowledge.exemplars.count ?? 0) pills remembered · "
+            + "\(brain?.trustedMedications.count ?? 0) trusted medications"
+            + ((brain?.labellingQueue.isEmpty ?? true) ? "" : " · \(brain!.labellingQueue.count) to label")
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+    } icon: {
+      Image(systemName: "brain").foregroundStyle(.purple)
+    }
+  }
+}
+
 struct ModelStatusBanner: View {
   @Environment(AppModel.self) private var app
 
@@ -85,7 +115,6 @@ struct ModelStatusBanner: View {
   private var title: String {
     switch app.modelState {
     case .loading: "Loading detection model…"
-    case .notInstalled: "No detection model installed"
     case .failed: "Detection model failed to load"
     case .ready(let model, _): model.capability.title
     }
@@ -95,10 +124,10 @@ struct ModelStatusBanner: View {
     switch app.modelState {
     case .loading:
       "Checking the model file and its manifest."
-    case .notInstalled:
-      "Automatic checking is off. Packs can still be checked and signed off manually."
     case .failed(let message):
       message
+    case .ready(let model, .none):
+      "\(model.manifest.modelID) failed its integrity check, so automatic checking is off."
     case .ready(let model, _):
       "\(model.manifest.modelID) \(model.manifest.version) · \(model.manifest.stage.rawValue)"
     }
@@ -106,7 +135,7 @@ struct ModelStatusBanner: View {
 
   private var color: Color {
     switch app.modelState {
-    case .loading, .notInstalled: .gray
+    case .loading: .gray
     case .failed: .red
     case .ready(let model, _): model.capability.color
     }

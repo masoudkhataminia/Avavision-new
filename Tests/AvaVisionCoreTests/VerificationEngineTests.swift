@@ -76,6 +76,23 @@ final class VerificationEngineTests: XCTestCase {
     XCTAssertEqual(verdict?.observedCount, 1)
   }
 
+  func testUncertainObjectsMakeAShortCountUncertainNotMissing() {
+    let others = Fixtures.layout.allCompartments.filter { $0 != target }.flatMap {
+      Fixtures.detections("pill", count: 1, in: $0)
+    }
+    let uncertain = evaluate(others + Fixtures.detections("pill", count: 1, in: target, confidence: 0.4))
+    let verdict = uncertain.verdict(for: target)
+    XCTAssertEqual(verdict?.status, .needsReview)
+    XCTAssertFalse(verdict?.findings.contains(.missing(expected: 1, observed: 0)) == true)
+
+    let twoExpected = Fixtures.profile(
+      default: one, overrides: [target: [ExpectedItem(medicationID: Fixtures.metformin, quantity: 3)]])
+    let certain = evaluate(
+      others + Fixtures.detections("pill", count: 1, in: target, confidence: 0.4), profile: twoExpected)
+    XCTAssertTrue(certain.verdict(for: target)?.findings.contains(.missing(expected: 3, observed: 0)) == true)
+    XCTAssertEqual(certain.verdict(for: target)?.status, .mismatch)
+  }
+
   func testObjectOnBorderFlagsBothCompartments() {
     let left = CompartmentIndex.at(0, 0)
     let cell = Fixtures.layout.cellRect(left)

@@ -14,18 +14,20 @@ struct SignOffView: View {
 
   var body: some View {
     if let result = flow.result {
-      let flagged = result.compartments.filter { $0.status != .verified }
+      let required = Set(result.compartmentsRequiringReview)
+      let flagged = result.compartments.filter { required.contains($0.compartment) }
       let countMatched = flagged.filter { $0.status == .countMatched }.map(\.compartment)
       Form {
         Section {
           Text(
-            "Inspect every flagged compartment in the physical pack and record what you found. "
-              + "Verified compartments still form part of your final check."
+            "Inspect every listed compartment in the physical pack and record what you found. "
+              + "Spot checks are verified compartments chosen at random so AvaVision's accuracy keeps being "
+              + "measured. Verified compartments still form part of your final check."
           )
           .font(.callout)
         }
 
-        Section("Flagged compartments (\(flagged.count))") {
+        Section("Compartments to inspect (\(flagged.count))") {
           if !countMatched.isEmpty {
             Button("Mark all \(countMatched.count) count-OK compartments as inspected") {
               isConfirmingBulk = true
@@ -37,7 +39,8 @@ struct SignOffView: View {
                 Image(systemName: verdict.status.symbol).foregroundStyle(verdict.status.color)
                 Text(flow.layout.label(for: verdict.compartment)).font(.subheadline.weight(.semibold))
                 Spacer()
-                Text(verdict.status.title).font(.caption).foregroundStyle(verdict.status.color)
+                Text(result.spotChecks.contains(verdict.compartment) ? "Spot check" : verdict.status.title)
+                  .font(.caption).foregroundStyle(verdict.status.color)
               }
               if let finding = verdict.findings.first(where: { $0 != .layoutUncalibrated }) ?? verdict.findings.first {
                 Text(finding.text(catalog: app.catalog)).font(.caption).foregroundStyle(.secondary)
@@ -164,6 +167,11 @@ struct CompletedView: View {
         Text("Signed off by \(record.signOff.pharmacistIdentifier) and saved to the audit trail.")
           .multilineTextAlignment(.center)
           .foregroundStyle(.secondary)
+        if let note = flow.learningNote {
+          Label(note, systemImage: "brain")
+            .font(.callout)
+            .foregroundStyle(.purple)
+        }
       }
       Spacer()
       Button {

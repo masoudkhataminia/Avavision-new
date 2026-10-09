@@ -74,7 +74,8 @@ struct CheckContainer: View {
       let session = try CheckSession(layout: layout, profile: profile, catalog: app.catalog)
       flow = CheckFlowModel(
         session: session, analyzer: app.analyzer(for: layout, orientation: orientation),
-        engine: app.engine(for: layout), model: app.modelState.activeModel)
+        engine: app.engine(for: layout), model: app.modelState.activeModel, identifier: app.pillIdentifier(),
+        brain: app.brain?.summary)
     } catch {
       setupError = "The profile or layout is incomplete. Fix it in Pack profiles or Settings."
     }

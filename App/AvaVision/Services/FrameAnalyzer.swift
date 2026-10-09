@@ -47,30 +47,28 @@ enum PackOrientation: String, CaseIterable, Identifiable {
 
 /// One analysed image together with the pixels it came from (kept in memory only).
 struct AnalyzedFrame: @unchecked Sendable {
-  let observation: FrameObservation
+  var observation: FrameObservation
   let image: CGImage
 }
 
-/// Turns an upright image into a `FrameObservation`: pack outline (Vision rectangle detection),
-/// objects (the Core ML model, if one may run) and capture quality. All stored state is immutable and
-/// Vision requests are created per call, so one analyzer can be used from any queue.
+/// Turns an upright image into a `FrameObservation` in two steps:
+/// `locate` (pack outline and capture quality — fast enough for the live camera) and
+/// `detectObjects` (pills in every compartment — run on the few frames that are evaluated).
+/// All stored state is immutable and Vision requests are created per call, so one analyzer can be
+/// used from any queue.
 final class FrameAnalyzer: @unchecked Sendable {
-  /// Detections below this confidence are model noise and are not reported. The release gate
-  /// evaluates the model at this same operating point.
-  static let detectionNoiseFloor: Float = 0.25
-
   let layout: PackLayout
   let orientation: PackOrientation
-  let visionModel: VNCoreMLModel?
+  let detector: ObjectDetector?
   private let quality = CaptureQualityAnalyzer()
 
-  init(layout: PackLayout, orientation: PackOrientation, visionModel: VNCoreMLModel?) {
+  init(layout: PackLayout, orientation: PackOrientation, detector: ObjectDetector?) {
     self.layout = layout
     self.orientation = orientation
-    self.visionModel = visionModel
+    self.detector = detector
   }
 
-  func analyze(_ image: CGImage, capturedAt: Date = Date()) -> AnalyzedFrame {
+  func locate(_ image: CGImage, capturedAt: Date = Date()) -> AnalyzedFrame {
     let rectangles = VNDetectRectanglesRequest()
     rectangles.maximumObservations = 1
     rectangles.minimumConfidence = 0.5
@@ -79,21 +77,11 @@ final class FrameAnalyzer: @unchecked Sendable {
     rectangles.maximumAspectRatio = 1.0
     rectangles.quadratureTolerance = 30
 
-    var requests: [VNRequest] = [rectangles]
-    var objectRequest: VNCoreMLRequest?
-    if let visionModel {
-      let request = VNCoreMLRequest(model: visionModel)
-      request.imageCropAndScaleOption = .scaleFit
-      requests.append(request)
-      objectRequest = request
-    }
-
     var issues: [CaptureIssue] = []
     var quad: Quad?
     var rectangleConfidence = 0.0
-    var detections: [Detection] = []
     do {
-      try VNImageRequestHandler(cgImage: image, orientation: .up).perform(requests)
+      try VNImageRequestHandler(cgImage: image, orientation: .up).perform([rectangles])
       if let rectangle = rectangles.results?.first {
         let detected = Quad(
           topLeft: Self.topLeftOrigin(rectangle.topLeft), topRight: Self.topLeftOrigin(rectangle.topRight),
@@ -102,14 +90,6 @@ final class FrameAnalyzer: @unchecked Sendable {
           for: detected, imageWidth: image.width, imageHeight: image.height, layout: layout)
         quad = detected.rotated(quarterTurns: turns)
         rectangleConfidence = Double(rectangle.confidence)
-      }
-      let objects = objectRequest?.results?.compactMap { $0 as? VNRecognizedObjectObservation } ?? []
-      detections = objects.compactMap { object in
-        guard let label = object.labels.first, label.confidence >= Self.detectionNoiseFloor else { return nil }
-        let box = object.boundingBox
-        return Detection(
-          label: label.identifier, confidence: Double(label.confidence),
-          boundingBox: Rect2D(x: box.minX, y: 1 - box.maxY, width: box.width, height: box.height))
       }
     } catch {
       issues.append(.analysisFailed)
@@ -126,9 +106,25 @@ final class FrameAnalyzer: @unchecked Sendable {
       quad: quad, detectorConfidence: rectangleConfidence, imageWidth: image.width, imageHeight: image.height,
       layout: layout)
     let observation = FrameObservation(
-      capturedAt: capturedAt, quality: assessment, registration: registration, detections: detections,
+      capturedAt: capturedAt, quality: assessment, registration: registration, detections: [],
       imageSHA256: gray.map { ContentHasher.sha256Hex(Data($0.pixels)) })
     return AnalyzedFrame(observation: observation, image: image)
+  }
+
+  /// Fills in the objects of a usable frame. If detection fails, the frame is marked unusable.
+  func detectObjects(in frame: AnalyzedFrame) -> AnalyzedFrame {
+    guard frame.observation.isUsable, let registration = frame.observation.registration.registration else {
+      return frame
+    }
+    var result = frame
+    guard let detector else { return result }
+    do {
+      result.observation.detections = try detector.detect(
+        in: frame.image, registration: registration, layout: layout)
+    } catch {
+      result.observation.quality.issues.append(.analysisFailed)
+    }
+    return result
   }
 
   /// Vision uses a bottom-left origin; the core uses top-left.

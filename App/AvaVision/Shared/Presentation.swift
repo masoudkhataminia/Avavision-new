@@ -88,6 +88,12 @@ extension Finding {
       return "Photos disagreed about this compartment."
     case .identityNotVerified:
       return "Count matches. Medication identity was not checked automatically."
+    case .suspectedMedication(let id):
+      return "AvaVision's brain thinks a pill here looks like \(name(id)), which is not expected."
+    case .unrecognisedPill(let count):
+      return "\(count) pill(s) look unlike every medication expected here."
+    case .conflictingIdentity(let count):
+      return "\(count) pill(s) were identified differently by the model and the brain."
     case .noExpectation:
       return "The pack profile does not define this compartment."
     case .layoutUncalibrated:
@@ -232,5 +238,38 @@ extension CompartmentReviewOutcome {
 extension PackProfile {
   var totalDoses: Int {
     compartments.reduce(0) { $0 + $1.totalQuantity }
+  }
+}
+
+extension TrustStatus {
+  var title: String {
+    switch self {
+    case .trusted: "Trusted"
+    case .suspended: "Suspended after an error"
+    case .learning(let progress): "Learning · \(Int((progress * 100).rounded(.down)))%"
+    }
+  }
+
+  var color: Color {
+    switch self {
+    case .trusted: .green
+    case .suspended: .red
+    case .learning: .orange
+    }
+  }
+}
+
+extension CalibrationReport.Outcome {
+  var text: String {
+    switch self {
+    case .calibrated(let accept, let margin):
+      "Calibrated (accept ≥ \(accept.formatted(.number.precision(.fractionLength(3)))), "
+        + "margin ≥ \(margin.formatted(.number.precision(.fractionLength(3)))))"
+    case .insufficientData(let medications, let queries):
+      "Needs more teaching: \(medications) medication(s) and \(queries) pills are well covered "
+        + "(at least 2 medications and 30 pills, each from 2+ photos)."
+    case .targetUnreachable:
+      "The remembered medications look too alike to separate safely yet. Teach more varied photos."
+    }
   }
 }

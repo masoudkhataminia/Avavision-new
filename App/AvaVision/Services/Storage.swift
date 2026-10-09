@@ -1,13 +1,15 @@
 import AvaVisionCore
 import Foundation
 
-/// Locations of everything the app persists. No images and no patient data are stored.
+/// Locations of everything the app persists. No pack photos and no patient data are stored; the
+/// brain keeps single-pill crops only.
 struct Storage: Sendable {
   let root: URL
   let catalog: JSONFileStore<MedicationCatalog>
   let profiles: JSONFileStore<[PackProfile]>
   let layouts: JSONFileStore<[PackLayout]>
   let audit: AuditLogStore
+  let brain: BrainStore
 
   init(root: URL) {
     self.root = root
@@ -15,6 +17,7 @@ struct Storage: Sendable {
     profiles = JSONFileStore(fileURL: root.appendingPathComponent("profiles.json"))
     layouts = JSONFileStore(fileURL: root.appendingPathComponent("layouts.json"))
     audit = AuditLogStore(fileURL: root.appendingPathComponent("audit/audit-log.jsonl"))
+    brain = BrainStore(root: root.appendingPathComponent("brain", isDirectory: true))
   }
 
   var auditFileURL: URL { audit.fileURL }

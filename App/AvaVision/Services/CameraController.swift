@@ -113,7 +113,7 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
       let image = ImageConversion.render(CIImage(cvPixelBuffer: pixelBuffer), maxDimension: 1920)
     else { return }
     lastAnalysis = now
-    let frame = analyzer.analyze(image, capturedAt: now)
+    let frame = analyzer.locate(image, capturedAt: now)
     DispatchQueue.main.async { self.onFrame?(frame) }
   }
 }

@@ -124,3 +124,20 @@ final class EvaluatorTests: XCTestCase {
     XCTAssertEqual(report.countFalseAcceptanceRate, 1)
   }
 }
+
+final class EmbedderManifestTests: XCTestCase {
+  func testIntegrityAndBuiltInSegmenter() throws {
+    let manifest = EmbedderManifest(
+      embedderID: "avavision-dinov2s-v1", version: "1", modelSHA256: "ABC", inputSize: 224, outputName: "embedding",
+      baseModelLicense: "Apache-2.0")
+    XCTAssertTrue(manifest.isIntact(computedModelSHA256: "abc"))
+    XCTAssertFalse(manifest.isIntact(computedModelSHA256: "abd"))
+    XCTAssertFalse(manifest.isIntact(computedModelSHA256: nil))
+    let data = try AvaVisionJSON.encoder().encode(manifest)
+    XCTAssertEqual(try AvaVisionJSON.decoder().decode(EmbedderManifest.self, from: data), manifest)
+
+    let segmenter = ActiveModel.builtInPocketSegmenter
+    XCTAssertEqual(segmenter.capability, .countOnly)
+    XCTAssertEqual(segmenter.meaning(of: "pill"), .pill)
+  }
+}

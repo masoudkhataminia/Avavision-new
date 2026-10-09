@@ -6,7 +6,7 @@ import XCTest
 
 final class FrameAnalyzerTests: XCTestCase {
   /// A light card with dark dots on a dark table, like a pack photographed from above.
-  private func syntheticPack(width: Int = 1200, height: Int = 900) throws -> CGImage {
+  static func syntheticPack(width: Int = 1200, height: Int = 900) throws -> CGImage {
     let context = try XCTUnwrap(
       CGContext(
         data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
@@ -28,8 +28,8 @@ final class FrameAnalyzerTests: XCTestCase {
   }
 
   func testFindsThePackOutlineWithoutAModel() throws {
-    let analyzer = FrameAnalyzer(layout: .weekly7x4, orientation: .upright, visionModel: nil)
-    let frame = analyzer.analyze(try syntheticPack())
+    let analyzer = FrameAnalyzer(layout: .weekly7x4, orientation: .upright, detector: nil)
+    let frame = analyzer.locate(try Self.syntheticPack())
     let registration = try XCTUnwrap(
       frame.observation.registration.registration, "registration: \(frame.observation.registration)")
     XCTAssertEqual(registration.quad.boundingBox.width, 0.7, accuracy: 0.05)
@@ -64,9 +64,39 @@ final class FrameAnalyzerTests: XCTestCase {
     XCTAssertEqual(gray.pixels, [255, 0])
   }
 
-  func testNoBundledModelMeansNotInstalled() {
-    guard case .notInstalled = ModelLoader.load(bundle: Bundle(for: Self.self)) else {
-      return XCTFail("Test bundle must not contain a model")
+  func testWithoutBundledModelTheBuiltInSegmenterCounts() {
+    guard case .ready(let model, let detector) = ModelLoader.load(bundle: Bundle(for: Self.self)) else {
+      return XCTFail("The built-in segmenter must always be available")
+    }
+    XCTAssertEqual(model.manifest.modelID, "avavision-pocket-segmenter")
+    XCTAssertEqual(model.capability, .countOnly)
+    XCTAssertTrue(detector is PocketSegmenter)
+  }
+
+  /// Every compartment of the synthetic pack holds one dark pill, which the classical half of the
+  /// segmenter always sees; whether the two halves agree decides only the confidence.
+  func testPocketSegmenterFindsOnePillPerCompartment() throws {
+    let image = try Self.syntheticPack()
+    let analyzer = FrameAnalyzer(layout: .weekly7x4, orientation: .upright, detector: PocketSegmenter())
+    let located = analyzer.locate(image)
+    let registration = try XCTUnwrap(located.observation.registration.registration)
+    let detections = try PocketSegmenter().detect(in: image, registration: registration, layout: .weekly7x4)
+    let byCompartment = CompartmentAssigner.pillCompartments(
+      in: FrameObservation(
+        capturedAt: Date(), quality: .accepted, registration: .registered(registration), detections: detections),
+      layout: .weekly7x4, minimumConfidence: 0, meaning: ActiveModel.builtInPocketSegmenter.meaning(of:))
+    XCTAssertEqual(Set(byCompartment.values).count, 28, "detections: \(detections.count)")
+  }
+
+  func testFeaturePrintEmbedsPillCrops() throws {
+    let image = try Self.syntheticPack()
+    let crop = try XCTUnwrap(PillCrops.crop(image, box: Rect2D(x: 0.2, y: 0.2, width: 0.05, height: 0.05)))
+    do {
+      let embedding = try FeaturePrintEmbedder().embed(crop)
+      XCTAssertGreaterThan(embedding.dimension, 100)
+      XCTAssertEqual(embedding.embedderID, "apple-vision-featureprint-r2")
+    } catch {
+      throw XCTSkip("Vision feature print is not available on this simulator: \(error)")
     }
   }
 }
@@ -107,5 +137,29 @@ final class AppModelTests: XCTestCase {
     let result = app.engine(for: .weekly7x4).evaluate(profile: profile, frames: [])
     XCTAssertEqual(result.packFindings, [.modelUnavailable])
     XCTAssertEqual(result.status, .needsReview)
+  }
+
+  @MainActor
+  func testBrainPersistsTeachingAndExportsTrainingData() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = BrainStore(root: root)
+    var brain = BrainState(embedderID: "test")
+    let crop = try XCTUnwrap(
+      PillCrops.crop(try FrameAnalyzerTests.syntheticPack(), box: Rect2D(x: 0.4, y: 0.4, width: 0.1, height: 0.1)))
+    let file = try await store.saveCrop(crop)
+    brain.teach("med-a", embeddings: [(Embedding(embedderID: "test", raw: [1, 0, 0])!, file)])
+    try await store.save(brain)
+    let loaded = try await store.load()
+    XCTAssertEqual(loaded?.knowledge.exemplars.count, 1)
+    XCTAssertNotNil(PillCrops.image(contentsOf: store.cropURL(file)))
+
+    let exported = try await store.exportTrainingData(brain, to: root.appendingPathComponent("export"))
+    XCTAssertEqual(exported, 1)
+    let labels = try String(contentsOf: root.appendingPathComponent("export/labels.jsonl"), encoding: .utf8)
+    XCTAssertTrue(labels.contains("med-a"))
+
+    await store.pruneCrops(keeping: [])
+    XCTAssertNil(PillCrops.image(contentsOf: store.cropURL(file)))
   }
 }
