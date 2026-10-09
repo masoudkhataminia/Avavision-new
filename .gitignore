@@ -33,3 +33,8 @@ data/**
 *.key
 *.p12
 *.mobileprovision
+
+# Python training
+__pycache__/
+.venv/
+training/runs/

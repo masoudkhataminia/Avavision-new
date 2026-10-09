@@ -53,7 +53,8 @@ actor BrainStore {
   }
 
   /// Writes every remembered crop and its label to `destination` for offline training:
-  /// `crops/<file>.jpg` plus `labels.jsonl` with one exemplar per line.
+  /// `crops/<file>.jpg`, `labels.jsonl` with one exemplar per line, and `brain.json` for
+  /// `avavision brain-report`.
   func exportTrainingData(_ brain: BrainState, to destination: URL) throws -> Int {
     let fileManager = FileManager.default
     try? fileManager.removeItem(at: destination)
@@ -81,6 +82,8 @@ actor BrainStore {
       count += 1
     }
     try lines.write(to: destination.appendingPathComponent("labels.jsonl"), options: .atomic)
+    try AvaVisionJSON.encoder(pretty: true).encode(brain).write(
+      to: destination.appendingPathComponent("brain.json"), options: .atomic)
     return count
   }
 }

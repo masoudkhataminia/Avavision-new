@@ -1,0 +1,48 @@
+name: Training pipeline
+
+# End-to-end check of the offline embedder pipeline on a Mac: synthetic data → fine-tune → Core ML
+# export with PyTorch parity check → compile → manifest the app accepts.
+on:
+  push:
+    paths:
+      - "training/**"
+      - "scripts/package-embedder.sh"
+      - "Sources/AvaVisionCLI/**"
+      - ".github/workflows/training.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: training-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  embedder:
+    name: Embedder fine-tune and export
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install training dependencies
+        run: pip install -r training/requirements.txt
+      - name: Fine-tune on synthetic pills
+        working-directory: training
+        run: |
+          python tools/make_synthetic_export.py "$RUNNER_TEMP/export"
+          python finetune.py --data "$RUNNER_TEMP/export" --out "$RUNNER_TEMP/run" --epochs 1 --batch-size 16
+      - name: Export to Core ML and verify against PyTorch
+        working-directory: training
+        run: |
+          python export_coreml.py --checkpoint "$RUNNER_TEMP/run/embedder.pt" \
+            --out "$RUNNER_TEMP/AvaVisionEmbedder.mlpackage" --embedder-id avavision-dinov2s-ci
+      - name: Compile and write the app manifest
+        run: |
+          xcrun coremlcompiler compile "$RUNNER_TEMP/AvaVisionEmbedder.mlpackage" "$RUNNER_TEMP/compiled"
+          swift run --quiet avavision embedder-manifest "$RUNNER_TEMP/compiled/AvaVisionEmbedder.mlmodelc" \
+            avavision-dinov2s-ci ci "Apache-2.0 (facebook/dinov2-with-registers-small)" | tee "$RUNNER_TEMP/manifest.json"
+          grep -q '"modelSHA256"' "$RUNNER_TEMP/manifest.json"
