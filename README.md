@@ -77,6 +77,8 @@ cd web && npm run build    # بررسی نوع‌ها و ساخت رابط
 
 ## مستندات
 
+**شروع از اینجا:** [AvaVision در یک نگاه](docs/PROJECT_OVERVIEW_FA.md): کل پروژه، تاریخچه، تصمیم‌ها، وضعیت و کارهای باز در یک سند.
+
 1. [معماری](docs/ARCHITECTURE_FA.md)
 2. [قوانین ایمنی](docs/SAFETY_RULES_FA.md)
 3. [راهنمای سخت‌افزار](docs/HARDWARE_FA.md)

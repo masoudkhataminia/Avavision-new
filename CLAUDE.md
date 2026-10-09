@@ -3,6 +3,10 @@
 Webster-pak verification station for pharmacists, on Windows with a fixed camera. Founder-facing docs are
 Persian (`docs/*_FA.md`); the interface and code are English.
 
+Start with `docs/PROJECT_OVERVIEW_FA.md`: the whole project, its history, every decision, the current state and the
+open items in one place. The founder's machine keeps the build chat, photos and raw history in `data/project-archive/`
+(git-ignored; never commit anything from it).
+
 ## Layout
 
 - `src/avavision/core` — all safety-relevant logic: decision engine, model gate, sign-off, audit chain,
