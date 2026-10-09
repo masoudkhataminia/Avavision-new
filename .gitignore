@@ -38,3 +38,8 @@ data/**
 __pycache__/
 .venv/
 training/runs/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+/dist/
+/station-data/

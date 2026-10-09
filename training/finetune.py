@@ -30,7 +30,9 @@ def device() -> torch.device:
 
 
 @torch.no_grad()
-def embed(model: PillEmbedder, dataset: PillDataset, batch_size: int, target: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+def embed(
+    model: PillEmbedder, dataset: PillDataset, batch_size: int, target: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
     model.eval()
     vectors, labels = [], []
     for images, targets in DataLoader(dataset, batch_size=batch_size):
@@ -41,7 +43,9 @@ def embed(model: PillEmbedder, dataset: PillDataset, batch_size: int, target: to
     return torch.cat(vectors), torch.cat(labels)
 
 
-def evaluate(gallery: tuple[torch.Tensor, torch.Tensor], queries: tuple[torch.Tensor, torch.Tensor], unseen: torch.Tensor) -> dict:
+def evaluate(
+    gallery: tuple[torch.Tensor, torch.Tensor], queries: tuple[torch.Tensor, torch.Tensor], unseen: torch.Tensor
+) -> dict:
     """1-NN accuracy on known medications, and the best acceptance threshold that keeps every unseen pill
     rejected while naming as many known pills correctly as possible (the app calibrates the same way)."""
     gallery_vectors, gallery_labels = gallery
@@ -85,7 +89,8 @@ def main() -> None:
     classes = sorted({s.medication for s in parts.train})
     if len(classes) < 2:
         raise SystemExit("Need pills of at least two medications in the training split.")
-    print(f"{len(parts.train)} train, {len(parts.validation)} validation, {len(parts.unseen)} unseen; {len(classes)} medications")
+    sizes = f"{len(parts.train)} train, {len(parts.validation)} validation, {len(parts.unseen)} unseen"
+    print(f"{sizes}; {len(classes)} medications")
 
     model = PillEmbedder(args.backbone, args.embedding_size).to(target)
     model.freeze_backbone(args.trainable_blocks)
@@ -129,8 +134,13 @@ def main() -> None:
         if accuracy >= best_accuracy:
             best_accuracy = accuracy
             torch.save(
-                {"state_dict": model.state_dict(), "backbone": args.backbone, "embedding_size": args.embedding_size,
-                 "classes": classes, "report": report},
+                {
+                    "state_dict": model.state_dict(),
+                    "backbone": args.backbone,
+                    "embedding_size": args.embedding_size,
+                    "classes": classes,
+                    "report": report,
+                },
                 out / "embedder.pt",
             )
     (out / "history.json").write_text(json.dumps(history, indent=2))

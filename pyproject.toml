@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "avavision"
+version = "0.2.0"
+description = "AvaVision: AI verification station for Webster-pak multi-dose packs (Windows)"
+license = { text = "Proprietary. All rights reserved." }
+requires-python = ">=3.11"
+# Every dependency must be permissively licensed (MIT / BSD / Apache-2.0). Never AGPL.
+dependencies = [
+  "numpy>=1.26,<2.3",
+  "opencv-contrib-python-headless==4.11.0.86",  # Apache-2.0; contrib adds ArUco markers
+  "onnxruntime==1.22.1",                        # MIT; on Windows use onnxruntime-directml or -gpu
+  "pydantic==2.11.7",
+  "fastapi==0.116.1",
+  "uvicorn==0.35.0",
+  "anthropic>=0.60",                            # MIT; optional language-model expert
+  "pypdf>=5.0",                                 # BSD; reading medication lists from PDF
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.1", "ruff==0.12.4", "httpx==0.28.1"]
+desktop = ["pywebview>=5.4"]                    # BSD; native window using Edge WebView2
+
+[project.scripts]
+avavision = "avavision.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/avavision"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests", "training"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
