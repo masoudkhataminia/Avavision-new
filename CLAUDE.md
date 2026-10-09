@@ -1,33 +1,43 @@
 # AvaVision — guidance for coding agents
 
-Webster-pak verification assistant for pharmacists (iOS). Founder-facing docs are Persian (`docs/*_FA.md`); app UI and code are English.
+Webster-pak verification station for pharmacists, on Windows with a fixed camera. Founder-facing docs are
+Persian (`docs/*_FA.md`); the interface and code are English.
 
 ## Layout
 
-- `Sources/AvaVisionCore` — all safety-relevant logic (Foundation only, builds on Linux).
-- `Sources/AvaVisionImaging` — capture-quality metrics on grayscale images.
-- `Sources/AvaVisionCore/Brain` — the learning brain (memory, open-set identification, calibration, trust ledger).
-- `Sources/AvaVisionCLI` — `avavision` tool (model hash, holdout evaluation, gate, audit verification, embedder manifest, brain report).
-- `training/` — offline Python pipeline: DINOv2 (Apache-2.0) metric learning → Core ML; CI in `.github/workflows/training.yml`.
-- `App/` — SwiftUI app; the Xcode project is generated from `App/project.yml` with XcodeGen and is not committed.
+- `src/avavision/core` — all safety-relevant logic: decision engine, model gate, sign-off, audit chain,
+  advisory opinions. Pure Python + pydantic; no I/O.
+- `src/avavision/brain` — the learning brain (memory, open-set identification, calibration, trust ledger).
+- `src/avavision/vision` — camera, pack finding (ArUco), quality, segmentation, ONNX Runtime embedder/detector,
+  synthetic station renderer.
+- `src/avavision/expert` — the Claude expert (chart reading, explanations, second opinions). Advisory only.
+- `src/avavision/storage` — SQLite (WAL) and image folders.
+- `src/avavision/station` — station service, FastAPI app (localhost), demo camera.
+- `web/` — React + TypeScript interface, built into `src/avavision/station/ui` (git-ignored).
+- `training/` — offline PyTorch fine-tuning of the embedder → ONNX.
+- `packaging/` — PyInstaller build of the Windows app.
 
 ## Commands
 
 ```bash
-swift test                                                   # core tests (macOS or Linux)
-swift format --in-place --recursive Package.swift Sources Tests App
-swift format lint --strict --recursive Package.swift Sources Tests App   # CI fails on any finding
-scripts/ios-test.sh                                          # Mac only: xcodegen + simulator tests
+pip install -e ".[dev]"
+pytest -q
+ruff check . && ruff format --check .        # CI fails on any finding
+cd web && npm ci && npm run build            # typecheck + build the interface
+avavision serve --demo                       # station with the simulated camera on http://127.0.0.1:8765
 ```
 
 ## Rules
 
-- Safety decisions live in `AvaVisionCore` and must have tests. The app only gathers evidence and displays results.
+- Safety decisions live in `src/avavision/core` (and the brain's trust rules) and must have tests. The station,
+  interface and expert only gather evidence and display results.
 - Never relax a fail-safe default (see `docs/SAFETY_RULES_FA.md`) without recording it in `docs/DECISIONS_FA.md`.
 - Weak, missing or conflicting evidence must never produce `verified` or `countMatched`.
-- No patient data, images, model weights or secrets in Git.
-- The product is proprietary (see LICENSE). Do not add third-party Swift dependencies; in `training/` use only
-  permissive licences and never AGPL or non-commercial weights (see `docs/DECISIONS_FA.md` D-116).
+- The language-model expert is never in the acceptance path: its opinions can only escalate (`core/advisory.py`).
 - Brain safety: the brain may only escalate until a medication earns trust in `TrustLedger`; it learns only from
   compartments a pharmacist inspected. Never feed automatically accepted results back as training data.
-- App target compiles in Swift 5 language mode; packages use Swift 6.
+- No secrets, API keys, images or model weights in Git.
+- The product is proprietary (see LICENSE). Only permissively licensed dependencies and weights (MIT / BSD /
+  Apache-2.0); never AGPL (e.g. Ultralytics) or non-commercial weights (see `docs/DECISIONS_FA.md` D-116).
+- Claude API code uses the official `anthropic` SDK, model `claude-opus-5-5`, explicit `effort`, structured
+  outputs, refusal handling and server-side fallbacks.

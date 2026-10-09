@@ -30,8 +30,14 @@ class ModelManifest(BaseModel):
     model_sha256: str
     #: Meaning of every output label, encoded like ``"pill"`` or ``"medication:<id>"``.
     labels: dict[str, str]
+    #: Output class names in the model's index order; when empty, the order of ``labels``.
+    classes: list[str] = []
     evaluation: EvaluationReport | None = None
     notes: str | None = None
+
+    @property
+    def class_names(self) -> list[str]:
+        return self.classes or list(self.labels)
 
     def meaning(self, label: str) -> LabelMeaning:
         """Unknown labels are treated as generic pills: an unexpected class is never ignored."""

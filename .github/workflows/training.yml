@@ -1,0 +1,38 @@
+name: Training pipeline
+
+on:
+  push:
+    paths: ["training/**", ".github/workflows/training.yml"]
+  pull_request:
+    paths: ["training/**", ".github/workflows/training.yml"]
+
+jobs:
+  smoke:
+    name: Fine-tune and export (CPU, synthetic data)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: training
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt
+      - run: python tools/make_synthetic_export.py "$RUNNER_TEMP/export"
+      - run: python finetune.py --data "$RUNNER_TEMP/export" --out "$RUNNER_TEMP/run" --epochs 1 --batch-size 16
+      - run: >
+          python export_onnx.py --checkpoint "$RUNNER_TEMP/run/embedder.pt" --out "$RUNNER_TEMP/build"
+          --embedder-id avavision-ci --version 0.0.0
+      - name: The station accepts the exported embedder
+        working-directory: .
+        run: |
+          python -m pip install -e .
+          mkdir -p "$RUNNER_TEMP/station/models"
+          cp "$RUNNER_TEMP/build/embedder.onnx" "$RUNNER_TEMP/build/embedder.json" "$RUNNER_TEMP/station/models/"
+          avavision --data "$RUNNER_TEMP/station" benchmark --frames 2 | tee benchmark.txt
+          grep -q "embedder: avavision-ci" benchmark.txt

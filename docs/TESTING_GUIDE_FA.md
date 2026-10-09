@@ -4,66 +4,92 @@
 
 | کجا | دستور | چه چیزی |
 |---|---|---|
-| Mac یا Linux | `swift test` | همه‌ی منطق: هندسه، موتور تصمیم، Gate، امضا، Audit، کیفیت تصویر |
-| Mac | `scripts/ios-test.sh` | ساخت اپ و تست‌های اپ روی Simulator |
-| GitHub | خودکار با هر push | هر دو مورد بالا + بررسی فرمت کد |
+| هر کامپیوتر | `pytest -q` | هسته‌ی ایمنی، مغز، بینایی روی تصویر شبیه‌سازی‌شده، متخصص (بدون API واقعی)، کل جریان ایستگاه از طریق API |
+| هر کامپیوتر | `cd web && npm run build` | بررسی نوع‌ها و ساخت رابط کاربری |
+| GitHub | خودکار با هر push | تست روی Linux و Windows، ساخت رابط، ساخت `AvaVision.exe` و اجرای آزمایشی آن |
 
-## ۲. اجرای اپ روی Simulator
+## ۲. اجرای ایستگاه بدون سخت‌افزار (دوربین نمایشی)
 
-```bash
-brew install xcodegen
-cd App && xcodegen generate && open AvaVision.xcodeproj
+**راه ساده (بدون Python):** در GitHub ← Actions ← آخرین اجرای سبز CI ← Artifacts ← `AvaVision-windows` را دانلود کنید، zip را باز کنید و در پوشه این را اجرا کنید:
+
+```
+avavision-cli.exe desktop --demo
 ```
 
-۱. در Xcode یک iPhone Simulator انتخاب کنید و Run بزنید.
-۲. Simulator دوربین ندارد؛ برای تست از عکس استفاده کنید: سه عکس از یک پک را با کشیدن روی پنجره‌ی Simulator به Photos اضافه کنید.
-۳. در اپ: **Medications** ← چند دارو اضافه کنید. **Pack profiles** ← پروفایل بسازید و خانه‌ها را پر کنید (دکمه‌های «Apply to whole row» سرعت را بالا می‌برند).
-۴. **Check a pack** ← پروفایل ← **Photos** ← هر سه عکس را انتخاب کنید.
+**راه توسعه‌دهنده:**
 
-بدون مدل، نتیجه «Pharmacist review required» است و همه‌ی خانه‌ها Review هستند. این رفتار درست و ایمن است.
+```bash
+pip install -e ".[dev,desktop]"
+cd web && npm ci && npm run build && cd ..
+avavision desktop --demo
+```
 
-## ۳. اجرای اپ روی iPhone واقعی
+دوربین نمایشی یک ایستگاه شبیه‌سازی‌شده با ۶ داروی فرضی و پروفایل `DEMO-001` است.
 
-۱. iPhone را با کابل وصل کنید و در iPhone: Settings ← Privacy & Security ← Developer Mode را روشن کنید.
-۲. در Xcode: پروژه ← target `AvaVision` ← Signing & Capabilities ← Team = Apple ID خودتان. اگر Bundle Identifier تکراری بود، آن را عوض کنید (مثلاً `com.avashmed.avavision.dev`).
-۳. دستگاه را به‌عنوان مقصد انتخاب و Run کنید. بار اول در iPhone: Settings ← General ← VPN & Device Management ← اعتماد به developer.
-۴. اجازه‌ی دوربین بدهید. پک را صاف زیر گوشی بگذارید؛ کادر زرد و شبکه‌ی خانه‌ها باید روی پک بنشیند و برچسب زرد روی خانه‌ی اول باشد. اگر نه، در **Settings ← Pack orientation** جهت را عوض کنید.
+۱. **Check** ← `DEMO-001` ← **Start check**. کادر سبز دور پک یعنی مارکرها پیدا شده‌اند.
+۲. **Capture** (یا کلید Space). نتیجه: همه‌ی خانه‌ها «Count OK» (آبی)، چون هنوز هویت دارو تأیید نشده.
+۳. روی هر خانه کلیک کنید تا محتوای مورد انتظار، تعداد دیده‌شده و یافته‌ها را ببینید.
+۴. **Confirm all "Count OK" compartments** ← حروف اول نام ← **Release pack**. پیام یادگیری مغز را ببینید.
+۵. دوباره Start check، و این بار از «Demo: packing error to simulate» یک خطا انتخاب کنید (missing، extra، swapped، foreign) و Capture کنید.
+۶. صفحه‌ی **Brain**: داروهای یادگرفته‌شده، صف برچسب‌زنی (کدام قرص کدام داروست) و آموزش از دوربین.
+۷. صفحه‌ی **Audit**: رکوردها و **Verify hash chain**.
 
-## ۴. سناریوهای پذیرش (با مدل)
+## ۳. اجرای ایستگاه با دوربین واقعی
 
-هر سناریو را روی ایستگاه واقعی اجرا کنید و نتیجه را ثبت کنید.
+پیش‌نیاز: [راهنمای سخت‌افزار](HARDWARE_FA.md).
+
+۱. `AvaVision.exe` (یا `avavision desktop`).
+۲. **Settings** ← Camera number و رزولوشن ← Save ← برنامه را دوباره باز کنید.
+۳. مارکرها را چاپ و روی سینی نصب کنید؛ Layout را کالیبره کنید.
+۴. **Catalog** ← داروها را اضافه کنید (نام، قدرت، رنگ، شکل).
+۵. **Profiles** ← New profile، یا **Import a medication chart** با PDF/عکس packing sheet (نیاز به کلید Claude).
+۶. **Brain** ← برای هر دارو، یک پک پر از همان دارو را چند بار (از پک‌های مختلف) Teach کنید.
+۷. `avavision-cli.exe benchmark` سرعت را روی همین کامپیوتر نشان می‌دهد.
+
+## ۴. سناریوهای پذیرش
+
+هر سناریو را روی ایستگاه واقعی اجرا و نتیجه را ثبت کنید.
 
 | # | سناریو | نتیجه‌ی مورد انتظار |
 |---|---|---|
-| 1 | پک درست، مدل فقط شمارش | همه‌ی خانه‌ها «Count OK»، پک آبی |
-| 2 | یک قرص کم | همان خانه قرمز «Missing dose» |
-| 3 | یک قرص اضافه | همان خانه قرمز «Extra dose» |
-| 4 | قرص روی دیواره‌ی بین دو خانه | هر دو خانه نارنجی «border» |
-| 5 | تکه‌ی کاغذ یا شیء خارجی | قرمز «Foreign object» (اگر مدل این کلاس را دارد) |
-| 6 | عکس تار یا لرزان | «Retake photos» |
-| 7 | نور مستقیم و براق روی پلاستیک | «Retake photos» با «glare» |
-| 8 | پک نصفه در کادر | «whole pack must be in view» |
-| 9 | Layout کالیبره‌نشده | هیچ خانه‌ای سبز/آبی نمی‌شود |
-| 10 | امضا بدون بررسی همه‌ی خانه‌های پرچم‌دار | پیام خطا، ثبت نمی‌شود |
-| 11 | Release و سپس Audit trail | رکورد با «Audit chain intact» |
+| 1 | پک درست، فقط شمارش | همه‌ی خانه‌ها «Count OK»، پک آبی |
+| 2 | یک قرص کم | همان خانه قرمز «fewer doses than expected» |
+| 3 | یک قرص اضافه | همان خانه قرمز «more doses than expected» |
+| 4 | قرص روی دیواره‌ی بین دو خانه | هر دو خانه نارنجی «object on the border» |
+| 5 | دو قرص چسبیده | نارنجی (هرگز با اطمینان شمرده نمی‌شوند) |
+| 6 | تکه‌ی کاغذ یا شیء خارجی | قرمز یا نارنجی، هرگز Count OK |
+| 7 | عکس تار یا لرزان | پیام «Blurry» و Retake |
+| 8 | نور مستقیم و براق روی بلیستر | پیام «Glare» |
+| 9 | یکی از مارکرها پوشیده | «Pack not found» |
+| 10 | Layout کالیبره‌نشده | هیچ خانه‌ای سبز نمی‌شود |
+| 11 | Release بدون بررسی خانه‌های پرچم‌دار | دکمه غیرفعال با دلیل |
+| 12 | Release و سپس Audit ← Verify | «Intact» |
 
 ## ۵. سناریوهای مغز
 
 | # | سناریو | نتیجه‌ی مورد انتظار |
 |---|---|---|
-| B1 | Brain ← Teach a medication برای ۲ دارو، هر کدام ۲ عکس از ۸ قرص | Calibration: «Calibrated»؛ هر دارو «Learning» |
-| B2 | پک با قرص داروی آموزش‌دیده‌ی دیگر در یک خانه | آن خانه نارنجی با پیام «brain thinks a pill here looks like…» |
-| B3 | امضای Release با «Correct» برای خانه‌های تک‌دارویی | پیام «The brain learned N new pill images» |
-| B4 | خانه‌ی چنددارویی تأییدشده | یک مورد در Brain ← Pills waiting for labels |
-| B5 | Brain ← Export training data | پوشه در Files ← On My iPhone ← AvaVision |
-| B6 | ۱۰۰+ شناسایی درست پیاپی یک دارو | وضعیت دارو «Trusted»؛ خانه‌های آن دارو سبز (با Layout کالیبره) |
-| B7 | یک شناسایی غلط بعد از Trusted | وضعیت «Suspended» |
+| B1 | Teach برای ۲ دارو، هر کدام از ۲ پک مختلف | Self-test: calibrated؛ هر دارو «Learning» |
+| B2 | پک با قرص داروی دیگری (آموزش‌دیده) در یک خانه | آن خانه نارنجی «a tablet that looks like …» |
+| B3 | Release با «Correct» برای خانه‌های تک‌دارویی | پیام «The brain learned N new pill images» |
+| B4 | خانه‌ی چنددارویی تأییدشده | یک مورد در صف برچسب‌زنی |
+| B5 | `avavision-cli.exe export-training D:\data` | پوشه‌ی داده برای آموزش چشم اختصاصی |
+| B6 | ۱۰۰+ شناسایی درست با حد پایین دقت ≥ ۹۷٪ و ۵۰ پیاپی | دارو «Trusted»؛ خانه‌های آن سبز (با Layout کالیبره) |
+| B7 | یک شناسایی غلط بعد از Trusted | «Suspended» |
+| B8 | `fetch-models` بعد از استفاده با چشم کلاسیک | مغز خودکار با چشم جدید از روی تصاویر ذخیره‌شده دوباره یاد می‌گیرد |
 
-نکته: segmenter روز اول روی Simulator کند است (حدود ۲۰ ثانیه برای یک عکس). روی iPhone با Neural Engine سرعتش باید اندازه‌گیری و ثبت شود.
+## ۶. سناریوهای متخصص (نیاز به کلید Claude)
 
-## ۶. کالیبراسیون قبل از Pilot
+| # | سناریو | نتیجه‌ی مورد انتظار |
+|---|---|---|
+| E1 | Import یک packing sheet واقعی (PDF) | پیش‌نویس با تطبیق داروها و لیست تردیدها؛ تا Save نشود استفاده نمی‌شود |
+| E2 | لیست با دارویی که در کاتالوگ نیست | issue «No catalog medication matches» |
+| E3 | لیست با نصف قرص | issue «Half tablets are not placed automatically» |
+| E4 | Second opinion روی پکی که یک خانه‌اش خطای عمدی دارد | اگر Claude مخالفت کند، آن خانه نارنجی |
+| E5 | Explain | خلاصه به زبان انتخاب‌شده، بدون تغییر هیچ یافته |
 
-۱. ابعاد کارت پک را با کولیس اندازه بگیرید (میلی‌متر).
-۲. در **Settings ← Pack layout** ابعاد و ناحیه‌ی شبکه را وارد کنید تا خطوط شبکه دقیقاً روی دیواره‌های خانه‌ها بیفتد.
-۳. فقط بعد از تأیید روی چند پک واقعی، گزینه‌ی **Calibrated** را روشن کنید.
-۴. آستانه‌های کیفیت تصویر (`CaptureQualityPolicy`) را با ۵۰ عکس خوب و ۵۰ عکس بد از ایستگاه تنظیم کنید و در دفتر تصمیم‌ها ثبت کنید.
+## ۷. کالیبراسیون قبل از Pilot
+
+۱. Layout را روی چند پک واقعی کالیبره کنید و فقط بعد از تأیید **Save as calibrated** بزنید.
+۲. آستانه‌های کیفیت تصویر (`QualityPolicy` در `vision/quality.py`) را با ۵۰ عکس خوب و ۵۰ عکس بد از ایستگاه تنظیم کنید و در دفتر تصمیم‌ها ثبت کنید.
+۳. آستانه‌های شمارش (`SegmentationPolicy`) را روی ۳۰ پک واقعی با خطاهای عمدی بررسی کنید: هدف این است که هیچ خانه‌ی خطادار «Count OK» نشود.

@@ -1,92 +1,95 @@
 # AvaVision
 
-دستیار بررسی Webster-pak برای داروساز. اپ iOS هر خانه‌ی پک را با پروفایل دارویی مورد انتظار مقایسه می‌کند و موارد Missing، Extra، Wrong، Broken و Foreign را با مدرک قابل ممیزی نشان می‌دهد. **تصمیم نهایی همیشه با داروساز است.**
+ایستگاه بررسی Webster-pak برای داروخانه، روی **Windows**. یک دوربین ثابت بالای سینی، هر خانه‌ی پک (۷ روز × ۴ نوبت) را با پروفایل دارویی مورد انتظار مقایسه می‌کند و موارد کم، زیاد، داروی اشتباه، شکسته و شیء خارجی را با مدرک قابل ممیزی نشان می‌دهد. **تصمیم نهایی همیشه با داروساز است.**
 
-> این مخزن بازنویسی کامل AvaVision از صفر است و هیچ کدی از نسخه‌ی قبلی (fork اپ Ultralytics با مجوز AGPL) در آن نیست.
-> **تمام حقوق محفوظ** ([LICENSE](LICENSE)). کد هیچ وابستگی خارجی ندارد.
+> **تمام حقوق محفوظ** ([LICENSE](LICENSE)). همه‌ی وابستگی‌ها مجوز آزاد تجاری دارند (MIT / BSD / Apache-2.0). AGPL و وزن‌های غیرتجاری ممنوع‌اند.
+> نسخه‌ی iOS قبلی در شاخه‌ی `archive/ios-prototype` نگه داشته شده است.
 
-## مغز یادگیرنده
+## سه لایه‌ی هوش
 
-اپ یک «مغز» دارد که ظاهر هر دارو را از تأییدهای داروساز یاد می‌گیرد و با هر بررسی قوی‌تر می‌شود:
+| لایه | کار | در مسیر قبول؟ |
+|---|---|---|
+| **بینایی** (OpenCV + ONNX Runtime روی GPU) | پیدا کردن پک با مارکر، کنترل کیفیت عکس، شمارش قرص در هر خانه با دو روش مستقل | شمارش: بله، با قوانین سخت‌گیرانه |
+| **مغز یادگیرنده** (DINOv2 + حافظه‌ی open-set) | شناختن ظاهر هر دارو از تأییدهای داروساز؛ با هر بررسی قوی‌تر می‌شود | فقط بعد از کسب اعتماد؛ از روز اول می‌تواند هشدار بدهد |
+| **متخصص زبانی** (Claude) | خواندن لیست دارو از PDF/عکس، توضیح نتیجه، نظر دوم روی هر خانه | **هرگز.** فقط هشدار می‌دهد یا کمک می‌کند |
 
-- **از روز اول ظرفیت دارد:**
-  - شمارش بدون آموزش با Apple Vision، کنترل‌شده با یک روش کلاسیک مستقل
-  - چشم ظاهر Apple
-  - آموزش هر دارو با چند عکس
-- **قوی‌تر می‌شود:** هر خانه‌ای که داروساز تأیید می‌کند به حافظه اضافه می‌شود، آستانه‌ها خودکار کالیبره می‌شوند، و سابقه‌ی هر دارو ساخته می‌شود.
-- **ایمن است:** مغز از روز اول فقط هشدار می‌دهد. قبول خودکار هر دارو را فقط با سابقه‌ی طولانی و بی‌خطا به دست می‌آورد، و با اولین خطا از دست می‌دهد.
-- **چشم اختصاصی:** با `training/`، DINOv2 روی داده‌ی خود داروخانه آموزش می‌بیند و جایگزین چشم Apple می‌شود.
-
-جزئیات: [مغز AvaVision](docs/BRAIN_FA.md) و [خلاصه‌ی تحقیق تکنولوژی روز](docs/RESEARCH_FA.md).
+جزئیات: [معماری](docs/ARCHITECTURE_FA.md)، [مغز](docs/BRAIN_FA.md)، [متخصص زبانی](docs/EXPERT_FA.md).
 
 ## وضعیت فعلی
 
 | بخش | وضعیت |
 |---|---|
-| هسته‌ی منطق (`AvaVisionCore`) | کامل، با تست (روی Linux و macOS) |
-| کنترل کیفیت تصویر (`AvaVisionImaging`) | کامل، با تست؛ آستانه‌ها هنوز روی ایستگاه واقعی کالیبره نشده‌اند |
-| اپ iOS | کامل: پروفایل، دوربین/عکس، نتیجه، امضای داروساز، Audit |
-| CI | GitHub Actions: Linux (lint + تست) و macOS (build + تست اپ در Simulator) |
-| مغز یادگیرنده | کامل، با تست: حافظه، شناسایی open-set، کالیبراسیون خودکار، دفتر اعتماد، spot check |
-| شمارش روز اول | segmenter داخلی (Apple Vision + کلاسیک)، روی Simulator تست شد؛ سرعت روی iPhone باید اندازه‌گیری شود |
-| آموزش چشم اختصاصی | `training/` (DINOv2 → Core ML)، کل مسیر در CI روی Mac تست می‌شود |
-| مدل تشخیص اختصاصی | هنوز آموزش ندیده (نیاز به عکس پک واقعی) |
-| کالیبراسیون Layout | **انجام نشده.** تا کالیبره نشود هیچ خانه‌ای خودکار قبول نمی‌شود |
+| هسته‌ی ایمنی (موتور تصمیم، Gate مدل، امضا، Audit زنجیره‌ای) | کامل، با تست |
+| مغز یادگیرنده (حافظه، شناسایی open-set، خودآزمایی، دفتر اعتماد، مهاجرت چشم) | کامل، با تست |
+| بینایی (مارکر ArUco، کیفیت، شمارش دوروشی، شناسایی یک‌بار در هر بررسی) | کامل، با تست روی تصویر شبیه‌سازی‌شده |
+| متخصص زبانی (Claude) | کامل، با تست (بدون اتصال واقعی به API) |
+| اپ ایستگاه (سرور محلی + رابط کاربری + پنجره‌ی Windows) | کامل؛ کل جریان با دوربین نمایشی تست شده |
+| بسته‌ی نصب Windows | در CI ساخته و smoke test می‌شود |
+| دوربین و پک واقعی | **هنوز تست نشده.** نیاز به سخت‌افزار ([راهنمای سخت‌افزار](docs/HARDWARE_FA.md)) |
+| کالیبراسیون Layout واقعی | **انجام نشده.** تا کالیبره نشود هیچ خانه‌ای خودکار قبول نمی‌شود |
+| مدل تشخیص اختصاصی (RF-DETR) | هنوز آموزش ندیده (نیاز به عکس پک واقعی) |
+
+## اجرا
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate                 # Linux/Mac: source .venv/bin/activate
+pip install -e ".[dev,desktop]"
+cd web && npm ci && npm run build && cd ..
+
+avavision desktop --demo               # پنجره‌ی ایستگاه با دوربین نمایشی (بدون سخت‌افزار)
+avavision desktop                      # با دوربین واقعی
+avavision fetch-models                 # نصب چشم DINOv2 (یک بار، ۸۸ مگابایت)
+avavision benchmark                    # اندازه‌گیری سرعت روی همین کامپیوتر
+```
+
+نسخه‌ی آماده‌ی Windows (بدون نصب Python): از GitHub Actions، artifact به نام `AvaVision-windows` را دانلود و `AvaVision.exe` را اجرا کنید.
+راهنمای کامل: [راهنمای تست](docs/TESTING_GUIDE_FA.md).
 
 ## ساختار
 
 ```
-Package.swift                 Swift Package: هسته + ابزار خط فرمان
-Sources/AvaVisionCore/        منطق دامنه: layout، پروفایل، هندسه، موتور تصمیم، Gate، Audit
-Sources/AvaVisionImaging/     کیفیت تصویر: وضوح، نور، Glare
-Sources/AvaVisionCore/Brain/  مغز یادگیرنده
-Sources/AvaVisionCLI/         ابزار `avavision`: hash مدل، ارزیابی Holdout، بررسی Audit، گزارش مغز
-training/                     آموزش آفلاین چشم اختصاصی (Python)
-Tests/                        تست‌های هسته (روی Linux و Mac اجرا می‌شوند)
-App/project.yml               تعریف پروژه‌ی Xcode (با XcodeGen ساخته می‌شود)
-App/AvaVision/                اپ SwiftUI
-App/AvaVisionTests/           تست‌های اپ (در Simulator)
-docs/                         مستندات فارسی
-scripts/ios-test.sh           ساخت و تست اپ روی Simulator
+src/avavision/core/       هسته‌ی ایمنی: layout، پروفایل، موتور تصمیم، Gate، امضا، Audit، نظر مشورتی
+src/avavision/brain/      مغز یادگیرنده
+src/avavision/vision/     دوربین، پیدا کردن پک، کیفیت، شمارش، چشم ONNX، شبیه‌ساز
+src/avavision/expert/     متخصص زبانی (Claude): خواندن لیست دارو، توضیح، نظر دوم
+src/avavision/storage/    SQLite + پوشه‌ی تصاویر
+src/avavision/station/    سرویس ایستگاه، API محلی، دوربین نمایشی
+src/avavision/__main__.py فرمان avavision
+web/                      رابط کاربری (React + TypeScript)
+training/                 آموزش آفلاین چشم اختصاصی (PyTorch → ONNX)
+packaging/                ساخت نسخه‌ی Windows (PyInstaller)
+tests/                    تست‌ها
+docs/                     مستندات فارسی
 ```
-
-## شروع سریع (روی Mac)
-
-پیش‌نیاز: Xcode 16 یا جدیدتر و [Homebrew](https://brew.sh).
-
-```bash
-brew install xcodegen
-git clone https://github.com/masoudkhataminia/Avavision-new.git
-cd Avavision-new/App
-xcodegen generate
-open AvaVision.xcodeproj
-```
-
-در Xcode، scheme `AvaVision` را انتخاب و Run کنید. راهنمای کامل تست روی Simulator و iPhone واقعی: [`docs/TESTING_GUIDE_FA.md`](docs/TESTING_GUIDE_FA.md).
 
 ## تست‌ها
 
 ```bash
-swift test               # تست‌های هسته (Mac یا Linux)
-scripts/ios-test.sh      # ساخت و تست اپ روی Simulator (فقط Mac)
+pytest -q                  # همه‌ی تست‌ها
+ruff check . && ruff format --check .
+cd web && npm run build    # بررسی نوع‌ها و ساخت رابط
 ```
 
 ## مستندات
 
 1. [معماری](docs/ARCHITECTURE_FA.md)
 2. [قوانین ایمنی](docs/SAFETY_RULES_FA.md)
-3. [راهنمای تست](docs/TESTING_GUIDE_FA.md)
-4. [پروتکل جمع‌آوری داده](docs/DATA_PROTOCOL_FA.md)
-5. [راهنمای مدل](docs/MODEL_GUIDE_FA.md)
-6. [مغز AvaVision](docs/BRAIN_FA.md)
+3. [راهنمای سخت‌افزار](docs/HARDWARE_FA.md)
+4. [راهنمای تست](docs/TESTING_GUIDE_FA.md)
+5. [مغز AvaVision](docs/BRAIN_FA.md)
+6. [متخصص زبانی](docs/EXPERT_FA.md)
 7. [راهنمای آموزش چشم اختصاصی](docs/TRAINING_GUIDE_FA.md)
-8. [خلاصه‌ی تحقیق تکنولوژی روز](docs/RESEARCH_FA.md)
-9. [نقشه‌ی راه تا محصول تجاری](docs/ROADMAP_FA.md)
-10. [دفتر تصمیم‌ها](docs/DECISIONS_FA.md)
+8. [راهنمای مدل تشخیص](docs/MODEL_GUIDE_FA.md)
+9. [پروتکل جمع‌آوری داده](docs/DATA_PROTOCOL_FA.md)
+10. [خلاصه‌ی تحقیق تکنولوژی روز](docs/RESEARCH_FA.md)
+11. [نقشه‌ی راه تا محصول تجاری](docs/ROADMAP_FA.md)
+12. [دفتر تصمیم‌ها](docs/DECISIONS_FA.md)
 
 ## قوانین ثابت
 
-- داده‌ی بیمار، رمز و کلید هرگز وارد Git نمی‌شود. اپ عکس پک ذخیره نمی‌کند (فقط hash آن در Audit)؛ مغز فقط تصویر تک‌قرص نگه می‌دارد.
 - مدرک ضعیف، ناقص یا متناقض هرگز «قبول» نمی‌شود؛ به بررسی داروساز می‌رود.
 - `Verified` فقط با Layout کالیبره‌شده و یکی از این دو ممکن است: مدل `released` که از Gate رد شده، یا اعتماد کسب‌شده‌ی مغز برای همه‌ی داروهای آن خانه.
-- هر پک قبل از خروج، امضای داروساز لازم دارد و در Audit زنجیره‌ای ثبت می‌شود.
+- متخصص زبانی هرگز چیزی را قبول نمی‌کند؛ مخالفتش خانه را به بررسی می‌برد.
+- هر پک قبل از خروج امضای داروساز لازم دارد و در Audit زنجیره‌ای ثبت می‌شود.
+- رمز، کلید API، عکس و وزن مدل هرگز وارد Git نمی‌شود.

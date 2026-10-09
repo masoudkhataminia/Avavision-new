@@ -1,83 +1,76 @@
-# معماری AvaVision
+# معماری AvaVision (ایستگاه Windows)
 
-## جریان داده
+## اجزای ایستگاه
+
+```mermaid
+flowchart LR
+    CAM["دوربین 4K روی پایه<br/>(USB، Media Foundation)"] --> FEED["LiveFeed<br/>همیشه تازه‌ترین فریم"]
+    FEED --> LIVE["نمایش زنده: پیدا کردن پک + کیفیت<br/>(~۱۵ میلی‌ثانیه)"]
+    FEED --> CHECK["بررسی پک"]
+    UI["رابط کاربری (React)<br/>داخل پنجره‌ی Windows"] <--> API["API محلی (FastAPI)<br/>فقط 127.0.0.1"]
+    API --> CHECK
+    CHECK --> DB[("SQLite + پوشه‌ی تصاویر")]
+    CHECK --> EXP["متخصص زبانی (Claude)<br/>فقط مشورتی"]
+```
+
+همه‌چیز روی خود کامپیوتر داروخانه اجرا می‌شود. تنها ارتباط بیرونی، درخواست‌های اختیاری به Claude است.
+
+## جریان یک بررسی
 
 ```mermaid
 flowchart TD
     P["پروفایل پک<br/>(محتوای مورد انتظار هر خانه)"] --> S
-    C["دوربین یا عکس"] --> F["FrameAnalyzer (اپ)"]
-    F --> R["Vision: پیدا کردن کادر پک"]
-    F --> M["Core ML: اشیای داخل پک"]
-    F --> Q["AvaVisionImaging: کیفیت تصویر"]
-    R --> O["FrameObservation"]
-    M --> O
-    Q --> O
-    F --> B["مغز: چشم + حافظه + اعتماد"]
-    B --> O
-    O --> S["CheckSession"]
-    S --> E["VerificationEngine"]
-    G["ReleaseGate + ModelManifest"] --> E
-    L["PackLayout (کالیبراسیون)"] --> E
-    E --> V["نتیجه‌ی هر خانه + نتیجه‌ی پک"]
-    V --> D["امضای داروساز (SignOffValidator)"]
-    D --> A["AuditChain (زنجیره‌ی hash)"]
+    G["سه فریم تازه بعد از زدن Capture"] --> L["locate: مارکرهای ArUco → کادر پک<br/>+ کیفیت (وضوح، نور، Glare)"]
+    L --> D["detect: صاف کردن پک (Homography)<br/>+ شمارش در هر خانه با دو روش مستقل<br/>(سه فریم موازی)"]
+    D --> I["identify: چشم ONNX روی GPU، فقط یک فریم<br/>+ انتقال نظر مغز به دو فریم دیگر"]
+    I --> S["CheckSession"]
+    S --> E["VerificationEngine<br/>(قوانین ایمنی)"]
+    E --> R["نتیجه‌ی هر خانه + پک"]
+    R --> A["نظر دوم Claude (اختیاری)<br/>فقط می‌تواند بدتر کند"]
+    A --> SO["امضای داروساز"]
+    R --> SO
+    SO --> AU["Audit زنجیره‌ای"]
+    SO --> BR["مغز: یادگیری فقط از خانه‌های<br/>بررسی‌شده و Correct"]
 ```
 
 ## ماژول‌ها
 
-| ماژول | محل | وابستگی | مسئولیت |
-|---|---|---|---|
-| `AvaVisionCore` | `Sources/AvaVisionCore` | فقط Foundation و swift-crypto | همه‌ی منطق قابل‌تست؛ روی Linux و iOS اجرا می‌شود |
-| `AvaVisionImaging` | `Sources/AvaVisionImaging` | Core | محاسبه‌ی وضوح (واریانس Laplacian)، نور و Glare روی تصویر خاکستری |
-| `avavision` (CLI) | `Sources/AvaVisionCLI` | Core | hash مدل، گزارش ارزیابی Holdout، بررسی Gate و Audit |
-| اپ iOS | `App/AvaVision` | Core، Imaging، SwiftUI، Vision، Core ML، AVFoundation | رابط کاربری، دوربین، اجرای مدل، ذخیره‌سازی |
+| ماژول | محل | مسئولیت |
+|---|---|---|
+| هسته‌ی ایمنی | `src/avavision/core` | layout، پروفایل، هندسه، موتور تصمیم، Gate مدل، امضا، Audit، نظر مشورتی. بدون I/O؛ کاملاً تست‌پذیر |
+| مغز | `src/avavision/brain` | حافظه، شناسایی open-set، خودآزمایی، دفتر اعتماد، برنامه‌ی یادگیری |
+| بینایی | `src/avavision/vision` | دوربین، مارکر و کادر پک، کیفیت، شمارش دوروشی، چشم و مدل تشخیص ONNX، شبیه‌ساز ایستگاه |
+| متخصص | `src/avavision/expert` | Claude: خواندن لیست دارو، توضیح، نظر دوم؛ تبدیل قطعی لیست دارو به پیش‌نویس پروفایل |
+| ذخیره‌سازی | `src/avavision/storage` | SQLite (WAL، synchronous FULL)، تصاویر قرص و شواهد |
+| ایستگاه | `src/avavision/station` | سرویس بررسی، API محلی، دوربین نمایشی، کلید API در Credential Manager |
+| رابط | `web/` | React + TypeScript؛ داخل بسته‌ی Python ساخته و سرو می‌شود |
+| آموزش | `training/` | fine-tune چشم DINOv2 روی داده‌ی خود داروخانه → ONNX |
 
-اصل طراحی: هر تصمیمی که روی ایمنی اثر دارد در `AvaVisionCore` است و تست دارد. اپ فقط داده جمع می‌کند و نتیجه را نشان می‌دهد.
+اصل طراحی: هر تصمیمی که روی ایمنی اثر دارد در `core` (و قوانین اعتماد مغز) است و تست دارد. ایستگاه، رابط و متخصص فقط مدرک جمع می‌کنند و نتیجه را نشان می‌دهند.
 
-## اجزای هسته
+## سرعت
 
-| فایل | کار |
+| مرحله | CPU معمولی | با کارت NVIDIA (تخمین) |
+|---|---|---|
+| پیدا کردن پک (هر فریم زنده) | ~۱۵ ms | همان |
+| شمارش ۲۸ خانه × ۳ فریم (موازی) | ~۳۰۰ ms | همان (CPU) |
+| چشم DINOv2 برای ~۵۰ قرص | ~۲٫۳ s | ~۳۰–۶۰ ms با TensorRT/CUDA |
+| کل بررسی | ~۳ s | **زیر ۰٫۵ s** |
+
+چشم فقط یک‌بار در هر بررسی اجرا می‌شود و نظرش به دو فریم دیگر منتقل می‌شود. ONNX Runtime خودکار سریع‌ترین سخت‌افزار را انتخاب می‌کند: TensorRT ← CUDA ← DirectML ← NPU ← CPU. اندازه‌گیری روی هر کامپیوتر: `avavision benchmark`.
+
+## ذخیره‌سازی
+
+پوشه‌ی داده: `%LOCALAPPDATA%\AvaVision`
+
+| مسیر | محتوا |
 |---|---|
-| `Domain/PackLayout.swift` | هندسه‌ی پک (ردیف/ستون، ناحیه‌ی خانه‌ها، نوار مرزی) و تشخیص اینکه یک نقطه در کدام خانه است |
-| `Domain/PackProfile.swift` | محتوای مورد انتظار هر خانه و اعتبارسنجی کامل بودن پروفایل |
-| `Geometry/Homography.swift` | تبدیل پرسپکتیو از تصویر دوربین به صفحه‌ی صاف پک |
-| `Capture/PackRegistration.swift` | قبول یا رد کادر پیدا‌شده (اندازه، زاویه، لبه‌ی تصویر، نسبت ابعاد) |
-| `Detection/CompartmentAssigner.swift` | نسبت دادن هر شیء به یک خانه؛ اشیای روی مرز «مبهم» علامت می‌خورند |
-| `Decision/VerificationEngine.swift` | مقایسه‌ی مشاهده با انتظار روی چند فریم و تولید نتیجه |
-| `Model/ModelManifest.swift` و `ReleaseGate.swift` | هویت و اعتبار مدل و تعیین توانایی مجاز (هیچ / فقط شمارش / شمارش + هویت) |
-| `Evaluation/Evaluator.swift` | محاسبه‌ی دقت، False Acceptance و معیارهای هر دارو از روی Holdout |
-| `Review/PharmacistSignOff.swift` | قوانین امضای داروساز |
-| `Audit/AuditLog.swift` | ثبت زنجیره‌ای و ضد دستکاری هر بررسی |
-| `Session/CheckSession.swift` | چرخه‌ی یک بررسی: عکس‌برداری ← تحلیل ← امضا ← رکورد |
-| `Brain/*` | مغز یادگیرنده: حافظه، شناسایی open-set، کالیبراسیون، دفتر اعتماد، برنامه‌ی یادگیری ([جزئیات](BRAIN_FA.md)) |
-| `Model/EmbedderManifest.swift` | هویت و بررسی سلامت چشم Core ML اختصاصی |
+| `avavision.sqlite3` | کاتالوگ، Layoutها، پروفایل‌ها، تنظیمات، Audit، حافظه‌ی مغز، صف برچسب‌زنی |
+| `images/crops/` | تصویر تک‌قرص‌های حافظه‌ی مغز (برای مهاجرت و آموزش) |
+| `images/evidence/` | عکس صاف‌شده‌ی پک برای هر بررسی (قابل خاموش کردن) |
+| `models/` | چشم ONNX و Manifest آن (با hash) |
 
-## اجزای اپ مربوط به هوش مصنوعی
+## API محلی
 
-| فایل | کار |
-|---|---|
-| `Services/ObjectDetectors.swift` | مدل تشخیص Core ML، یا segmenter بدون‌آموزش روز اول (Vision + روش کلاسیک) |
-| `Services/PillEmbedder.swift` | چشم: Apple feature print یا مدل Core ML اختصاصی |
-| `Services/PillCrops.swift` | برش هر قرص و پرسیدن نظر مغز |
-| `Services/BrainStore.swift` | ذخیره‌ی مغز و تصاویر تک‌قرص، خروجی برای آموزش |
-| `Features/Brain/BrainViews.swift` | داشبورد مغز، آموزش دارو، صف برچسب‌زدن |
-| `training/` | آموزش آفلاین چشم اختصاصی (Python) |
-
-جریان یک بررسی: تصویر زنده فقط جای پک و کیفیت را می‌سنجد. وقتی سه عکس خوب جمع شد، روی همان سه عکس قرص‌ها پیدا و از مغز پرسیده می‌شوند، سپس موتور تصمیم اجرا می‌شود. بعد از امضای داروساز، مغز از خانه‌های تأییدشده یاد می‌گیرد.
-
-## مختصات
-
-- تصویر: نرمال‌شده ۰ تا ۱، مبدأ بالا-چپ (Vision مبدأ پایین-چپ دارد و اپ تبدیل می‌کند).
-- پک: نرمال‌شده ۰ تا ۱ روی کارت پک، گوشه‌ی بالا-چپ = خانه‌ی اول (مثلاً Day 1 · Morning).
-- جهت قرارگیری پک در عکس از تنظیمات اپ (Pack orientation) تعیین می‌شود و روی تصویر زنده با برچسب زرد قابل بررسی است.
-
-## ذخیره‌سازی در اپ
-
-در `Application Support/AvaVision`:
-
-- `catalog.json`، `profiles.json`، `layouts.json`
-- `audit/audit-log.jsonl` — هر خط یک `AuditEntry` با hash خودش و hash قبلی
-
-- `brain/brain.json` و `brain/crops/` — حافظه‌ی مغز و تصاویر تک‌قرص (رمزگذاری کامل، بیرون از Backup)
-
-عکس کل پک ذخیره نمی‌شود (ممکن است برچسب پک نام بیمار داشته باشد). فقط SHA-256 پیکسل‌های تحلیل‌شده در Audit می‌ماند.
+سرور فقط روی `127.0.0.1:8765` گوش می‌دهد. مستندات خودکار: `http://127.0.0.1:8765/docs`.
+گروه‌ها: `/api/status`، `/api/camera/*`، `/api/check/*`، `/api/profiles/*`، `/api/catalog/*`، `/api/brain/*`، `/api/audit/*`، `/api/settings`.

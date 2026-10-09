@@ -4,15 +4,19 @@ import time
 from types import SimpleNamespace
 
 import numpy as np
+import onnx
 import pytest
 from fastapi.testclient import TestClient
+from onnx import TensorProto, helper, numpy_helper
 
+from avavision.core.gate import CapabilityKind, ModelManifest, ModelStage
 from avavision.expert.charts import ChartDose, ChartLine, DoseTime, MedicationChart, Weekday
 from avavision.expert.claude import MODEL, ClaudeExpert, CompartmentReading, Match
 from avavision.station.api import create_app
 from avavision.station.demo import DemoCamera
-from avavision.station.service import Station, StationSettings
+from avavision.station.service import Station, StationSettings, load_detector
 from avavision.storage.database import Database
+from avavision.vision.runtime import file_sha256
 
 
 @pytest.fixture
@@ -202,3 +206,62 @@ def test_brain_moves_to_a_new_embedder(tmp_path):
     reloaded = Database(tmp_path).load_brain("tint-v2")
     assert {e.embedder_id for e in reloaded.knowledge.exemplars} == {"tint-v2"}
     assert all(e.vector.shape == (6,) for e in reloaded.knowledge.exemplars)
+
+
+def fake_detector(path):
+    boxes = np.array([[0.5, 0.5, 0.1, 0.1]], dtype=np.float32)
+    logits = np.array([[4.0, -4.0]], dtype=np.float32)
+    graph = helper.make_graph(
+        [
+            helper.make_node("Constant", [], ["dets"], value=numpy_helper.from_array(boxes[None], "d")),
+            helper.make_node("Constant", [], ["labels"], value=numpy_helper.from_array(logits[None], "l")),
+        ],
+        "fake-rfdetr",
+        [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, 3, 64, 64])],
+        [
+            helper.make_tensor_value_info("dets", TensorProto.FLOAT, [1, 1, 4]),
+            helper.make_tensor_value_info("labels", TensorProto.FLOAT, [1, 1, 2]),
+        ],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    model.ir_version = 9
+    onnx.save(model, path)
+
+
+def test_installed_detector_passes_the_gate_before_use(tmp_path):
+    models = tmp_path / "models"
+    models.mkdir()
+    fake_detector(models / "detector.onnx")
+    manifest = ModelManifest(
+        model_id="avavision-rfdetr",
+        version="1",
+        stage=ModelStage.DEVELOPMENT,
+        model_sha256=file_sha256(models / "detector.onnx"),
+        labels={"pill": "pill", "broken": "broken"},
+    )
+    (models / "detector.json").write_text(manifest.model_dump_json())
+    model, detector, note = load_detector(models)
+    assert model.manifest.model_id == "avavision-rfdetr" and model.capability.kind == CapabilityKind.COUNT_ONLY
+    assert detector.input_size == 64 and detector.classes == ["pill", "broken"] and note is None
+    assert [d.label for d in detector.detect(np.zeros((80, 80, 3), np.uint8))] == ["pill"]
+
+    tampered = manifest.model_copy(update={"model_sha256": "0" * 64})
+    (models / "detector.json").write_text(tampered.model_dump_json())
+    model, detector, note = load_detector(models)
+    assert model.manifest.model_id == "avavision-pocket-segmenter" and detector is None and "hash" in note.lower()
+
+
+def test_command_line(tmp_path, capsys):
+    from avavision.__main__ import main
+
+    samples = tmp_path / "samples.json"
+    samples.write_text(
+        '[{"sample_id": "a", "expected": {"m": 1}, "truth": {"m": 1}, "predicted_count": 1,'
+        ' "predicted_status": "countMatched"}]'
+    )
+    main(["--data", str(tmp_path / "station"), "evaluate", str(samples), "holdout-1"])
+    assert '"dataset_id": "holdout-1"' in capsys.readouterr().out
+    main(["--data", str(tmp_path / "station"), "verify-audit"])
+    assert "intact (0 entries)" in capsys.readouterr().out
+    main(["--data", str(tmp_path / "station"), "markers", "--out", str(tmp_path / "m.png")])
+    assert (tmp_path / "m.png").stat().st_size > 1000

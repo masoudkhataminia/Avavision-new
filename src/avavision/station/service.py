@@ -25,7 +25,14 @@ from ..brain.learning import PillSighting, plan_learning
 from ..core.advisory import AdvisoryOpinion
 from ..core.audit import CheckRecord, ModelSummary
 from ..core.engine import BrainContext, CompartmentStatus, DecisionPolicy, VerificationEngine
-from ..core.gate import ActiveModel, EmbedderManifest, builtin_pocket_segmenter
+from ..core.gate import (
+    ActiveModel,
+    CapabilityKind,
+    EmbedderManifest,
+    ModelManifest,
+    builtin_pocket_segmenter,
+    evaluate_gate,
+)
 from ..core.models import WEEKLY_7X4, Catalog, CompartmentIndex, ExpectedItem, PackLayout, PackProfile
 from ..core.observation import pill_compartments
 from ..core.session import CheckSession, Phase
@@ -35,6 +42,7 @@ from ..expert.claude import ClaudeExpert, ExpertCall, ExpertError, ExpertSetting
 from ..expert.describe import describe_finding, describe_pack_finding
 from ..storage.database import Database
 from ..vision.camera import CameraSettings, CameraSource, FrameSource, LiveFeed
+from ..vision.detector import OnnxDetector
 from ..vision.embedder import ClassicEmbedder, OnnxEmbedder
 from ..vision.pack_finder import FinderMode
 from ..vision.pipeline import AnalyzedFrame, FrameAnalyzer, compartment_crop, propagate_identities
@@ -141,6 +149,21 @@ def migrate_brain(brain: Brain, embedder, crops: Path, batch: int = 64) -> Brain
     return migrated
 
 
+def load_detector(models: Path) -> tuple[ActiveModel, OnnxDetector | None, str | None]:
+    """The station's own detector if one is installed and the release gate lets it run; otherwise the built-in
+    segmenter, which only counts. The gate decides what the detector may do (count only, or identify)."""
+    path, manifest_path = models / "detector.onnx", models / "detector.json"
+    if not path.exists() or not manifest_path.exists():
+        return builtin_pocket_segmenter(), None, None
+    manifest = ModelManifest.model_validate_json(manifest_path.read_text())
+    decision = evaluate_gate(manifest, file_sha256(path))
+    if decision.capability.kind == CapabilityKind.UNAVAILABLE:
+        reasons = ", ".join(b.kind.value for b in decision.blockers) or "unavailable"
+        return builtin_pocket_segmenter(), None, f"detector {manifest.model_id} not used: {reasons}"
+    model = ActiveModel(manifest=manifest, decision=decision)
+    return model, OnnxDetector(path, manifest.class_names), None
+
+
 def _ms(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 1)
 
@@ -156,12 +179,16 @@ class Station:
         embedder=None,
         embedder_note: str | None = None,
         model: ActiveModel | None = None,
+        detector: OnnxDetector | None = None,
+        model_note: str | None = None,
         expert: ClaudeExpert | None = None,
     ):
         self.db = db
         self.settings = settings
         self.demo = demo
         self.model = model or builtin_pocket_segmenter()
+        self.detector = detector
+        self.model_note = model_note
         self.embedder = embedder or ClassicEmbedder()
         self.embedder_note = embedder_note
         self.brain = db.load_brain(self.embedder.id) or Brain(self.embedder.id)
@@ -210,8 +237,20 @@ class Station:
             except RuntimeError as error:
                 source = NoCamera(str(error))
         embedder, note = load_embedder(data_dir / "models")
+        model, detector, model_note = load_detector(data_dir / "models")
         expert = ClaudeExpert(settings.expert, api_key=load_api_key(db)) if settings.expert_enabled else None
-        return cls(db, settings, source, demo=demo_camera, embedder=embedder, embedder_note=note, expert=expert)
+        return cls(
+            db,
+            settings,
+            source,
+            demo=demo_camera,
+            embedder=embedder,
+            embedder_note=note,
+            model=model,
+            detector=detector,
+            model_note=model_note,
+            expert=expert,
+        )
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -233,7 +272,7 @@ class Station:
     def _apply_layout(self) -> None:
         layouts = {lay.id: lay for lay in self.db.layouts()}
         self.layout = layouts.get(self.settings.layout_id, WEEKLY_7X4)
-        self.analyzer = FrameAnalyzer(self.layout, mode=self.settings.finder_mode)
+        self.analyzer = FrameAnalyzer(self.layout, mode=self.settings.finder_mode, detector=self.detector)
 
     def _live_loop(self) -> None:
         last = None
@@ -289,6 +328,7 @@ class Station:
                 "id": self.model.manifest.model_id,
                 "version": self.model.manifest.version,
                 "capability": self.model.capability.kind.value,
+                "note": self.model_note,
             },
             "brain": self.brain.summary.model_dump(mode="json"),
             "expert": {

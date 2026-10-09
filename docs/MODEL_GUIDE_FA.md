@@ -1,74 +1,71 @@
-# راهنمای مدل
+# راهنمای مدل تشخیص
 
-> **بدون مدل هم اپ می‌شمارد:** segmenter داخلی (Apple Vision + روش کلاسیک) با وضعیت count-only کار می‌کند. این راهنما برای مدل تشخیص اختصاصی است. چشم مغز در [راهنمای آموزش](TRAINING_GUIDE_FA.md) آمده.
+> **بدون مدل هم ایستگاه می‌شمارد:** شمارش داخلی (دو روش مستقل OpenCV) با وضعیت count-only کار می‌کند. این راهنما برای مدل تشخیص اختصاصی است که بعد از جمع شدن عکس پک واقعی آموزش داده می‌شود. چشم مغز در [راهنمای آموزش](TRAINING_GUIDE_FA.md) آمده.
 
-اپ به هیچ مدل یا کتابخانه‌ی خاصی وابسته نیست. هر مدل **Core ML Object Detection** که خروجی `VNRecognizedObjectObservation` بدهد کار می‌کند (Create ML، یا مدل‌های دیگر با NMS داخلی).
-
-## انتخاب ابزار آموزش و مجوز
+## انتخاب مدل و مجوز
 
 | گزینه | مجوز | نکته |
 |---|---|---|
-| **Create ML** (اپ رایگان اپل روی Mac) | بدون محدودیت تجاری | ساده‌ترین شروع؛ خروجی مستقیم Core ML. پیشنهاد برای نسخه‌ی اول |
-| **RF-DETR Nano/Small/Medium** | Apache-2.0 | پیشنهاد تحقیق؛ خروجی رسمی Core ML (`rfdetr[coreml]`). اندازه‌های Atto/Femto/Pico/XL/2XL مجوز PML-1.0 دارند و ممنوع‌اند |
+| **RF-DETR Nano/Small/Medium** | Apache-2.0 | پیشنهاد اصلی؛ خروجی رسمی ONNX، دقیق روی اشیای کوچک، روی RTX در چند میلی‌ثانیه |
+| RT-DETRv2، D-FINE | Apache-2.0 | ممکن؛ خروجی ONNX باید با قالب پایین سازگار شود |
+| RF-DETR Atto/Femto/Pico/XL/2XL | PML-1.0 | ممنوع |
 | Ultralytics YOLO، DEIMv2 | AGPL-3.0 / غیرتجاری | ممنوع (D-116) |
-| RT-DETRv2، D-FINE | Apache-2.0 | ممکن، ولی تبدیل به Core ML دستی است |
 
-## ساخت مدل با Create ML (خلاصه)
+## قالب ONNX که ایستگاه می‌خواند
 
-۱. دیتاست را طبق [پروتکل داده](DATA_PROTOCOL_FA.md) با برچسب‌های `pill`، `broken`، `foreign` (و کد داروها برای هویت) آماده کنید.
-۲. Create ML ← Object Detection ← داده‌ی آموزش را بدهید ← Train.
-۳. خروجی `.mlmodel` را کامپایل کنید:
+خروجی استاندارد RF-DETR (`model.export()`):
 
-```bash
-xcrun coremlcompiler compile Detector.mlmodel out/
-mv out/Detector.mlmodelc out/AvaVisionDetector.mlmodelc
-```
+- ورودی `input`: تصویر RGB مربعی (1, 3, S, S) با نرمال‌سازی ImageNet. S از خود مدل خوانده می‌شود.
+- خروجی `dets`: (1, Q, 4) کادرها به‌صورت (cx, cy, w, h) نرمال‌شده.
+- خروجی `labels`: (1, Q, C) logit هر کلاس.
+
+تشخیص‌های زیر ۲۵٪ نویز حساب می‌شوند؛ بین ۲۵٪ و ۶۰٪ شمرده نمی‌شوند و خانه را به Review می‌برند.
 
 ## Manifest
 
-فایل `AvaVisionDetector.json` کنار مدل:
+فایل `detector.json` کنار `detector.onnx`:
 
 ```json
 {
-  "schemaVersion": 1,
-  "modelID": "avavision-detector",
+  "schema_version": 1,
+  "model_id": "avavision-rfdetr",
   "version": "2026.11.0",
   "stage": "development",
-  "modelSHA256": "<خروجی دستور hash>",
+  "model_sha256": "<خروجی دستور hash>",
+  "classes": ["pill", "broken", "foreign"],
   "labels": {
     "pill": "pill",
     "broken": "broken",
-    "foreign": "foreign",
-    "metformin-500": "medication:metformin-500"
+    "foreign": "foreign"
   },
   "notes": "Count-only pilot model"
 }
 ```
 
+- `classes`: نام کلاس‌ها به ترتیب خروجی مدل.
+- `labels`: معنی هر کلاس. برای هویت دارو: `"metformin-500": "medication:metformin-500"`. کلاسی که معنی ندارد «قرص» حساب می‌شود، نه نادیده.
+
 ```bash
-swift run avavision hash out/AvaVisionDetector.mlmodelc     # مقدار modelSHA256
-swift run avavision gate AvaVisionDetector.json out/AvaVisionDetector.mlmodelc   # ببینید Gate چه اجازه‌ای می‌دهد
+avavision gate detector.json detector.onnx      # Gate چه اجازه‌ای می‌دهد؛ خروجی hash را هم نشان می‌دهد
 ```
 
 ## Stage و چرخه‌ی انتشار
 
-| stage | اپ چه می‌کند |
+| stage | ایستگاه چه می‌کند |
 |---|---|
 | `development` | فقط شمارش |
 | `validation` | فقط شمارش (در حال ارزیابی روی Holdout) |
 | `released` | هویت، فقط اگر `evaluation` همه‌ی شرط‌های Gate را پاس کند |
 | `revoked` | مدل اجرا نمی‌شود |
 
-برای `released`: خروجی `avavision evaluate` را در فیلد `evaluation` بگذارید، stage را `released` کنید، hash را دوباره بررسی کنید.
+برای `released`: گزارش ارزیابی Holdout را در فیلد `evaluation` بگذارید و stage را `released` کنید. شرط‌ها در [قوانین ایمنی](SAFETY_RULES_FA.md) آمده‌اند.
 
-## افزودن به اپ
+## نصب روی ایستگاه
 
-۱. `AvaVisionDetector.mlmodelc` و `AvaVisionDetector.json` را در `App/AvaVision/Models/` کپی کنید (وارد Git نمی‌شوند).
-۲. `cd App && xcodegen generate` و دوباره Build.
-۳. در اپ: Settings ← Detection model باید stage و توانایی را نشان دهد. اگر hash نخواند، مدل اجرا نمی‌شود.
+۱. `detector.onnx` و `detector.json` را در پوشه‌ی `models` ایستگاه کپی کنید (`%LOCALAPPDATA%\AvaVision\models`). این فایل‌ها وارد Git نمی‌شوند.
+۲. ایستگاه را دوباره باز کنید.
+۳. اگر hash نخواند یا مدل `revoked` باشد، ایستگاه مدل را اجرا نمی‌کند، به شمارش داخلی برمی‌گردد و دلیل را در `/api/status` (فیلد `model.note`) نشان می‌دهد.
 
-## نقطه‌ی کار مدل
+## سرعت
 
-- تشخیص‌های زیر ۲۵٪ اطمینان نویز حساب می‌شوند (`FrameAnalyzer.detectionNoiseFloor`).
-- تشخیص‌های بین ۲۵٪ و ۶۰٪ شمرده نمی‌شوند و خانه را به Review می‌برند.
-- ارزیابی Holdout باید با همین آستانه‌ها انجام شود.
+مدل تشخیص روی کل عکس اجرا می‌شود (نه هر خانه جدا). روی کارت RTX با TensorRT، RF-DETR Small حدود ۵–۱۰ میلی‌ثانیه برای هر فریم طول می‌کشد. اندازه‌گیری: `avavision benchmark`.

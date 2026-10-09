@@ -173,6 +173,16 @@ def _export_training(args) -> None:
     print(f"exported {count} pill images of {len(brain.knowledge.medications)} medications to {out}")
 
 
+def _evaluate(args) -> None:
+    """Holdout samples (JSON list) → the evaluation report that goes into a detector manifest."""
+    from pydantic import TypeAdapter
+
+    from .core.evaluation import EvaluationSample, evaluate
+
+    samples = TypeAdapter(list[EvaluationSample]).validate_json(Path(args.samples).read_text())
+    print(evaluate(samples, args.dataset_id).model_dump_json(indent=2))
+
+
 def _gate(args) -> None:
     from .core.gate import ModelManifest, evaluate_gate
     from .vision.runtime import file_sha256
@@ -210,6 +220,9 @@ def main(argv: list[str] | None = None) -> None:
     commands.add_parser("verify-audit", help="verify the audit hash chain")
     export = commands.add_parser("export-training", help="export confirmed pill images for training/")
     export.add_argument("out")
+    evaluation = commands.add_parser("evaluate", help="evaluation report from holdout samples")
+    evaluation.add_argument("samples")
+    evaluation.add_argument("dataset_id")
     gate = commands.add_parser("gate", help="evaluate a detector model against the release gate")
     gate.add_argument("manifest")
     gate.add_argument("model")
@@ -227,6 +240,8 @@ def main(argv: list[str] | None = None) -> None:
         _verify_audit(args)
     elif args.command == "export-training":
         _export_training(args)
+    elif args.command == "evaluate":
+        _evaluate(args)
     elif args.command == "gate":
         _gate(args)
     elif args.command == "markers":

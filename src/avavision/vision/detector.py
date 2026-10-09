@@ -19,12 +19,14 @@ from .runtime import create_session
 
 
 class OnnxDetector:
-    def __init__(self, path: Path | str, classes: list[str], input_size: int = 560, noise_floor: float = 0.25):
+    def __init__(self, path: Path | str, classes: list[str], input_size: int | None = None, noise_floor: float = 0.25):
         self.session = create_session(path)
         self.classes = classes
-        self.input_size = input_size
+        model_input = self.session.get_inputs()[0]
+        side = model_input.shape[-1] if model_input.shape else None
+        self.input_size = input_size or (side if isinstance(side, int) else 560)
         self.noise_floor = noise_floor
-        self.input_name = self.session.get_inputs()[0].name
+        self.input_name = model_input.name
 
     def detect(self, image: np.ndarray) -> list[Detection]:
         """Boxes in normalized image coordinates. The image is stretched to the square input, as RF-DETR

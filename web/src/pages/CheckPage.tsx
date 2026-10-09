@@ -120,7 +120,8 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
 
   const setReview = (c: CompartmentView, outcome: ReviewOutcome) => setReviews((r) => ({ ...r, [key(c)]: outcome }));
   const confirmRemaining = () => {
-    const easy = unreviewed.filter((c) => c.status === "verified" || c.status === "countMatched");
+    // Spot checks and flagged compartments must each be inspected and marked on their own.
+    const easy = unreviewed.filter((c) => c.status === "countMatched");
     if (!easy.length) return;
     if (!window.confirm(`I have inspected these ${easy.length} compartments and their content is correct.`)) return;
     setReviews((r) => ({ ...r, ...Object.fromEntries(easy.map((c) => [key(c), "confirmedCorrect" as const])) }));
@@ -299,8 +300,8 @@ export function CheckPage({ status, onChange }: { status: Status | null; onChang
 
             <div className="panel stack">
               <div className="row">
-                <button onClick={confirmRemaining} disabled={!unreviewed.some((c) => c.status !== "needsReview" && c.status !== "mismatch")}>
-                  Confirm remaining OK compartments
+                <button onClick={confirmRemaining} disabled={!unreviewed.some((c) => c.status === "countMatched")}>
+                  Confirm all "Count OK" compartments
                 </button>
                 <button onClick={retake} disabled={busy !== null}>
                   Retake

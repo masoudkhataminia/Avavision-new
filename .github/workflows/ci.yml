@@ -89,7 +89,7 @@ jobs:
           if (-not $ok) { throw "the packaged station did not start" }
           if ($page.Content -notmatch "/assets/") { throw "the interface is missing from the package" }
           Write-Output "providers: $($status.providers -join ', ')"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: AvaVision-windows
           path: dist/AvaVision
