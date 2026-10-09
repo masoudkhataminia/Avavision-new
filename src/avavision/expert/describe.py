@@ -41,6 +41,7 @@ def describe_finding(f: Finding, catalog: Catalog) -> str:
         FindingKind.ADVISOR_DISAGREES: "the second opinion saw something different",
         FindingKind.PHYSICAL_MISMATCH: "a tablet whose size or colour matches none of the expected medications",
         FindingKind.VIEW_OBSCURED: "glare or a covering hides part of this compartment",
+        FindingKind.UNLIKE_PEERS: "looks different from the other compartments that should hold the same tablets",
         FindingKind.PACK_NOT_SEEN: "the camera found far too few doses in the whole pack, so this count proves nothing",
         FindingKind.NO_EXPECTATION: "the profile does not say what belongs here",
         FindingKind.LAYOUT_UNCALIBRATED: "the pack layout is not calibrated",

@@ -10,8 +10,9 @@ from .advisory import AdvisoryOpinion, apply_advisories
 from .audit import CheckRecord, ModelSummary
 from .card import check_card
 from .engine import VerificationEngine, VerificationResult
-from .models import Catalog, PackLayout, PackProfile
+from .models import Catalog, CompartmentIndex, PackLayout, PackProfile
 from .observation import FrameObservation
+from .peers import apply_peer_check
 from .signoff import SignOff, validate_sign_off
 
 
@@ -79,6 +80,16 @@ class CheckSession:
             raise SessionError(f"cannot read the card in phase {self.phase}")
         self.card_codes = sorted(set(self.card_codes) | set(codes))
         self.result = check_card(self.result, self.profile, self.card_codes)
+        return self.result
+
+    def compare_peers(self, unlike: dict[CompartmentIndex, float]) -> VerificationResult:
+        """Records the compartments that look unlike the others meant to hold the same tablets (core.peers)."""
+        if self.phase != Phase.ANALYZED or self.result is None:
+            raise SessionError(f"cannot compare compartments in phase {self.phase}")
+        outside = [i for i in unlike if not self.layout.contains(i)]
+        if outside:
+            raise SessionError(f"compartments outside the layout: {outside}")
+        self.result = apply_peer_check(self.result, unlike)
         return self.result
 
     def retake(self) -> None:

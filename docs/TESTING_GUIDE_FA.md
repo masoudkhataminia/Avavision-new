@@ -100,6 +100,7 @@ avavision desktop --demo
 | P4 | کد پروفایل را در Profiles ← Header-card code وارد کنید و کارت را جلوی دوربین بگذارید | بررسی همان پروفایل خودکار شروع می‌شود |
 | P5 | هنگام بررسی، کارت پک دیگری کنار سینی باشد | کل پک نارنجی؛ برای Release باید یافته‌ی کارت تأیید شود |
 | P6 | Audit ← Export checking records | فایل CSV با یک ردیف برای هر پک امضاشده |
+| P7 | پک درست، بعد در یک روز یک قرص رنگی را بردارید یا با قرص رنگی دیگری عوض کنید | فقط همان خانه نارنجی «looks different from the other compartments that should hold the same tablets» |
 
 در دوربین نمایشی: خطای `swapped` (بعد از Teach) و `wrongCard`.
 

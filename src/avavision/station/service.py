@@ -37,6 +37,7 @@ from ..core.gate import (
 )
 from ..core.models import WEEKLY_7X4, Catalog, CompartmentIndex, ExpectedItem, PackLayout, PackProfile
 from ..core.observation import pill_compartments
+from ..core.peers import peer_groups, unlike_peers
 from ..core.physical import PhysicalFeatures, PhysicalRange
 from ..core.session import CheckSession, Phase
 from ..core.signoff import SignOff
@@ -49,6 +50,7 @@ from ..vision.codes import code_image, read_codes
 from ..vision.detector import OnnxDetector
 from ..vision.embedder import ClassicEmbedder, OnnxEmbedder
 from ..vision.pack_finder import FinderMode
+from ..vision.peers import compartment_signatures
 from ..vision.pipeline import AnalyzedFrame, FrameAnalyzer, compartment_crop, propagate_identities
 from ..vision.runtime import available_providers, file_sha256
 from ..vision.segmentation import rectify
@@ -571,6 +573,12 @@ class Station:
                 check.session.record(frame.observation)
             check.session.analyze(self._engine())
             check.session.see_card(read_codes(images[0]))
+            groups = peer_groups(check.profile, self.layout)
+            if evidence is not None and groups:
+                # Compartments that should hold the same tablets must look alike; obscured ones cannot be compared.
+                obscured = set(evidence.observation.obscured)
+                signatures = compartment_signatures(evidence.rectified.canvas, self.layout, obscured)
+                check.session.compare_peers(unlike_peers(signatures, groups))
             check.frames, check.evidence = frames, evidence
             check.timings = {
                 "grab_ms": round((grabbed - started) * 1000, 1),

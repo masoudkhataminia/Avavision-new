@@ -62,6 +62,7 @@ class FindingKind(StrEnum):
     PHYSICAL_MISMATCH = "physicalMismatch"  # size or colour fits none of the expected medications; core.physical
     VIEW_OBSCURED = "viewObscured"  # glare or a covering hides part of the compartment; its count proves nothing
     PACK_NOT_SEEN = "packNotSeen"  # the camera found far too few doses in the whole pack; see DecisionPolicy
+    UNLIKE_PEERS = "unlikePeers"  # looks unlike the compartments that should hold the same tablets; core.peers
     NO_EXPECTATION = "noExpectation"
     LAYOUT_UNCALIBRATED = "layoutUncalibrated"
     NOT_EVALUATED = "notEvaluated"
