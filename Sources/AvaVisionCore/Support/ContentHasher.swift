@@ -1,10 +1,9 @@
-import Crypto
 import Foundation
 
 /// SHA-256 helpers used for model integrity, image provenance and the audit chain.
 public enum ContentHasher {
   public static func sha256Hex(_ data: Data) -> String {
-    hex(SHA256.hash(data: data))
+    hex(SHA256Hasher.hash(data))
   }
 
   public static func sha256Hex(_ string: String) -> String {

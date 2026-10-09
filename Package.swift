@@ -10,14 +10,8 @@ let package = Package(
     .library(name: "AvaVisionImaging", targets: ["AvaVisionImaging"]),
     .executable(name: "avavision", targets: ["AvaVisionCLI"]),
   ],
-  dependencies: [
-    .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"4.0.0")
-  ],
   targets: [
-    .target(
-      name: "AvaVisionCore",
-      dependencies: [.product(name: "Crypto", package: "swift-crypto")]
-    ),
+    .target(name: "AvaVisionCore"),
     .target(
       name: "AvaVisionImaging",
       dependencies: ["AvaVisionCore"]
