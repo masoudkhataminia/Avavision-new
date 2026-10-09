@@ -38,7 +38,8 @@ def _serve(args, open_window: bool) -> None:
     from .station.service import Station
 
     station = Station.open(args.data, demo=args.demo)
-    app = create_app(station)
+    loopback = args.host in ("127.0.0.1", "localhost")
+    app = create_app(station, allowed_hosts=["127.0.0.1", "localhost"] if loopback else None)
     config = uvicorn.Config(app, host=args.host, port=args.port, log_level="warning")
     server = uvicorn.Server(config)
     url = f"http://{args.host}:{args.port}/"

@@ -8,12 +8,14 @@ from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import cv2
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..brain.learning import LabellingError
 from ..core.audit import CheckRecord
@@ -72,7 +74,7 @@ PLACEHOLDER = """<!doctype html><html><head><meta charset="utf-8"><title>AvaVisi
 <p>API: <a href="/docs">/docs</a></p></body></html>"""
 
 
-def create_app(station: Station, start: bool = True) -> FastAPI:
+def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if start:
@@ -82,6 +84,19 @@ def create_app(station: Station, start: bool = True) -> FastAPI:
             station.stop()
 
     app = FastAPI(title="AvaVision station", version=station.status()["version"], lifespan=lifespan)
+    if allowed_hosts:
+        # A web page cannot reach the station through DNS rebinding.
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
+    @app.middleware("http")
+    async def same_origin(request: Request, call_next):
+        """Another web site open on the station's computer must not be able to change anything."""
+        origin = request.headers.get("origin")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and origin:
+            host = request.headers.get("host", "").split(":")[0]
+            if urlsplit(origin).hostname != host:
+                return JSONResponse(status_code=403, content={"error": "cross-origin request refused"})
+        return await call_next(request)
 
     # ------------------------------------------------------------------ errors
 

@@ -265,3 +265,16 @@ def test_command_line(tmp_path, capsys):
     assert "intact (0 entries)" in capsys.readouterr().out
     main(["--data", str(tmp_path / "station"), "markers", "--out", str(tmp_path / "m.png")])
     assert (tmp_path / "m.png").stat().st_size > 1000
+
+
+def test_other_web_sites_cannot_drive_the_station(tmp_path):
+    station = Station.open(tmp_path, demo=True)
+    app = create_app(station, start=False, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+    client = TestClient(app)
+    refused = client.put("/api/settings", json={"language": "fa"}, headers={"Origin": "https://evil.example"})
+    assert refused.status_code == 403
+    assert (
+        client.put("/api/settings", json={"language": "fa"}, headers={"Origin": "http://testserver"}).status_code == 200
+    )
+    assert client.get("/api/status", headers={"Host": "evil.example"}).status_code == 400
+    station.db.close()
