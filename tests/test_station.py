@@ -3,13 +3,16 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from avavision.expert.charts import ChartDose, ChartLine, DoseTime, MedicationChart, Weekday
 from avavision.expert.claude import MODEL, ClaudeExpert, CompartmentReading, Match
 from avavision.station.api import create_app
-from avavision.station.service import Station
+from avavision.station.demo import DemoCamera
+from avavision.station.service import Station, StationSettings
+from avavision.storage.database import Database
 
 
 @pytest.fixture
@@ -168,3 +171,34 @@ def test_chart_import_and_second_opinions(client):
     assert len(reviewed["advisories"]) == 28 and reviewed["result"]["status"] == "needsReview"
     escalated = [c for c in reviewed["result"]["compartments"] if c["status"] == "needsReview"]
     assert len(escalated) >= 1 and all(c["advisory"]["verdict"] == "disagrees" for c in escalated)
+
+
+class TintEmbedder:
+    """A different vector space: mean colour and its spread."""
+
+    id = "tint-v2"
+
+    def embed(self, crops):
+        rows = [np.concatenate([c.reshape(-1, 3).mean(0), c.reshape(-1, 3).std(0)]) for c in crops]
+        matrix = np.asarray(rows, dtype=np.float32)
+        return matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
+
+
+def test_brain_moves_to_a_new_embedder(tmp_path):
+    station = Station.open(tmp_path, demo=True)
+    with TestClient(create_app(station)) as client:
+        assert client.post("/api/brain/teach", json={"medication_id": "aspirin-100"}).status_code == 200
+        view = run_check(client, client.get("/api/profiles").json()[0]["id"])
+        client.post("/api/check/sign-off", json={"pharmacist": "MK", "decision": "released", "reviews": reviews(view)})
+        assert len(station.brain.labelling_queue) == 14
+
+    moved = Station(Database(tmp_path), StationSettings(layout_id="station-7x4"), DemoCamera(), embedder=TintEmbedder())
+    assert moved.brain.embedder_id == "tint-v2" and moved.brain.knowledge.exemplars
+    assert all(e.vector.shape == (6,) for e in moved.brain.knowledge.exemplars)
+    assert len(moved.brain.labelling_queue) == 14
+    assert all(s.identity is None and s.vector.shape == (6,) for t in moved.brain.labelling_queue for s in t.sightings)
+    moved.db.close()
+
+    reloaded = Database(tmp_path).load_brain("tint-v2")
+    assert {e.embedder_id for e in reloaded.knowledge.exemplars} == {"tint-v2"}
+    assert all(e.vector.shape == (6,) for e in reloaded.knowledge.exemplars)

@@ -142,6 +142,37 @@ def _verify_audit(args) -> None:
     print(f"audit chain intact ({count} entries)")
 
 
+def _export_training(args) -> None:
+    """Pills the brain learned from pharmacist-confirmed checks, in the format ``training/`` reads."""
+    import shutil
+
+    from .storage.database import Database
+
+    db = Database(args.data)
+    brain = db.load_brain("")
+    if brain is None:
+        sys.exit("the brain is empty")
+    out = Path(args.out)
+    (out / "crops").mkdir(parents=True, exist_ok=True)
+    count = 0
+    with open(out / "labels.jsonl", "w", encoding="utf-8") as labels:
+        for exemplar in brain.knowledge.exemplars:
+            source = db.crops / exemplar.crop_file if exemplar.crop_file else None
+            if source is None or not source.is_file():
+                continue
+            shutil.copyfile(source, out / "crops" / exemplar.crop_file)
+            row = {
+                "crop": f"crops/{exemplar.crop_file}",
+                "medicationID": exemplar.medication_id,
+                "source": exemplar.source.value,
+                "groupID": exemplar.group_id,
+                "createdAt": exemplar.created_at.isoformat(),
+            }
+            labels.write(json.dumps(row) + "\n")
+            count += 1
+    print(f"exported {count} pill images of {len(brain.knowledge.medications)} medications to {out}")
+
+
 def _gate(args) -> None:
     from .core.gate import ModelManifest, evaluate_gate
     from .vision.runtime import file_sha256
@@ -177,6 +208,8 @@ def main(argv: list[str] | None = None) -> None:
     benchmark = commands.add_parser("benchmark", help="time the pipeline on simulated frames")
     benchmark.add_argument("--frames", type=int, default=6)
     commands.add_parser("verify-audit", help="verify the audit hash chain")
+    export = commands.add_parser("export-training", help="export confirmed pill images for training/")
+    export.add_argument("out")
     gate = commands.add_parser("gate", help="evaluate a detector model against the release gate")
     gate.add_argument("manifest")
     gate.add_argument("model")
@@ -192,6 +225,8 @@ def main(argv: list[str] | None = None) -> None:
         _benchmark(args)
     elif args.command == "verify-audit":
         _verify_audit(args)
+    elif args.command == "export-training":
+        _export_training(args)
     elif args.command == "gate":
         _gate(args)
     elif args.command == "markers":

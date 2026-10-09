@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==8.4.1", "ruff==0.12.4", "httpx==0.28.1"]
+dev = ["pytest==8.4.1", "ruff==0.12.4", "httpx==0.28.1", "onnx==1.18.0"]
 desktop = [
   "pywebview>=6.2",                             # BSD; native window using Edge WebView2
   "keyring>=25",                                # MIT; API key in Windows Credential Manager

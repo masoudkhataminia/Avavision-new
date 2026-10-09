@@ -262,8 +262,10 @@ class Database:
         }
         current = {e.id: e for e in brain.knowledge.exemplars}
         with self._lock, self._db:
-            stored = {r[0] for r in self._db.execute("SELECT id FROM exemplars").fetchall()}
-            removed = stored - current.keys()
+            # Rows from another embedder (before a migration) hold vectors of another space: replace them.
+            rows = self._db.execute("SELECT id, embedder_id FROM exemplars").fetchall()
+            stored = {i for i, embedder in rows if embedder == brain.embedder_id and i in current}
+            removed = {i for i, _ in rows} - stored
             self._db.executemany("DELETE FROM exemplars WHERE id = ?", [(i,) for i in removed])
             self._db.executemany(
                 "INSERT INTO exemplars(id, medication_id, embedder_id, source, group_id, created_at, crop_file, "

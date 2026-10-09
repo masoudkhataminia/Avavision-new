@@ -112,6 +112,35 @@ def load_embedder(models: Path):
     return embedder, None
 
 
+def migrate_brain(brain: Brain, embedder, crops: Path, batch: int = 64) -> Brain:
+    """Moves the brain to a new embedder by re-embedding every stored crop. Pills without a crop are dropped;
+    thresholds and track records start again because the vector space changed."""
+
+    def embed(files: list[str]) -> dict[str, np.ndarray]:
+        images = {f: cv2.imread(str(crops / f)) for f in files}
+        readable = [f for f, image in images.items() if image is not None]
+        vectors: dict[str, np.ndarray] = {}
+        for start in range(0, len(readable), batch):
+            chunk = readable[start : start + batch]
+            for name, vector in zip(chunk, embedder.embed([images[f] for f in chunk]), strict=True):
+                vectors[name] = vector
+        return vectors
+
+    by_crop = embed(sorted({e.crop_file for e in brain.knowledge.exemplars if e.crop_file}))
+    migrated = brain.migrated(
+        embedder.id, {e.id: by_crop[e.crop_file] for e in brain.knowledge.exemplars if e.crop_file in by_crop}
+    )
+    task_crops = embed(sorted({s.crop_file for t in brain.labelling_queue for s in t.sightings if s.crop_file}))
+    for task in brain.labelling_queue:
+        if all(s.crop_file in task_crops for s in task.sightings):
+            for sighting in task.sightings:
+                sighting.vector = task_crops[sighting.crop_file]
+                sighting.embedder_id = embedder.id
+                sighting.identity = None  # an opinion from the old space must not count towards new trust
+            migrated.labelling_queue.append(task)
+    return migrated
+
+
 def _ms(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 1)
 
@@ -136,6 +165,10 @@ class Station:
         self.embedder = embedder or ClassicEmbedder()
         self.embedder_note = embedder_note
         self.brain = db.load_brain(self.embedder.id) or Brain(self.embedder.id)
+        if self.brain.embedder_id != self.embedder.id:
+            self.brain = migrate_brain(self.brain, self.embedder, db.crops)
+            db.save_brain(self.brain)
+            db.prune_crops(db.referenced_crops(self.brain))
         self.policy = DecisionPolicy()
         self.expert = expert
         self.feed = LiveFeed(source)
