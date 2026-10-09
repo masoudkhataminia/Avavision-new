@@ -21,7 +21,7 @@ from ..brain.identity import IdentityEvidence, IdentityPolicy
 from ..brain.knowledge import Exemplar, ExemplarSource
 from ..brain.learning import LabellingTask, PillSighting
 from ..brain.trust import TrustLedger, TrustPolicy
-from ..core.audit import GENESIS_HASH, AuditEntry, ChainDefect, CheckRecord, make_entry, verify_chain
+from ..core.audit import GENESIS_HASH, AuditEntry, ChainDefect, CheckRecord, entry_hash, make_entry, verify_chain
 from ..core.models import WEEKLY_7X4, Catalog, CompartmentIndex, PackLayout, PackProfile
 
 SCHEMA = """
@@ -67,6 +67,9 @@ class Database:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript(SCHEMA)
+        #: (entries verified, hash of the last one) — see ``append_audit``.
+        self._verified: tuple[int, str] = (0, GENESIS_HASH)
+        self._defect: ChainDefect | None = None
 
     def close(self) -> None:
         with self._lock:
@@ -149,22 +152,65 @@ class Database:
         return [AuditEntry(sequence=r[0], previous_hash=r[1], payload=r[2], hash=r[3]) for r in rows]
 
     def verify_audit(self) -> ChainDefect | None:
-        return verify_chain(self.audit_entries())
-
-    def append_audit(self, record: CheckRecord) -> AuditEntry:
-        """Refuses to extend a chain that no longer verifies."""
+        """Re-checks the whole chain. A defect blocks every further append in this process."""
         with self._lock:
             entries = self.audit_entries()
             defect = verify_chain(entries)
             if defect is not None:
-                raise AuditChainBroken(defect)
-            entry = make_entry(record, len(entries), entries[-1].hash if entries else GENESIS_HASH)
+                self._defect = defect
+            else:
+                self._verified = (len(entries), entries[-1].hash if entries else GENESIS_HASH)
+            return defect
+
+    def append_audit(self, record: CheckRecord) -> AuditEntry:
+        """Refuses to extend a chain that no longer verifies. The whole chain is verified the first time;
+        after that only entries added since (``verify_audit`` re-checks everything on demand)."""
+        with self._lock:
+            count, previous = self._verified_tail()
+            entry = make_entry(record, count, previous)
             with self._db:
                 self._db.execute(
                     "INSERT INTO audit(sequence, previous_hash, payload, hash) VALUES(?, ?, ?, ?)",
                     (entry.sequence, entry.previous_hash, entry.payload, entry.hash),
                 )
+            self._verified = (count + 1, entry.hash)
             return entry
+
+    def _verified_tail(self) -> tuple[int, str]:
+        if self._defect is not None:
+            raise AuditChainBroken(self._defect)
+        count, previous = self._verified
+        if count:
+            row = self._db.execute("SELECT hash FROM audit WHERE sequence = ?", (count - 1,)).fetchone()
+            if row is None or row[0] != previous:
+                raise AuditChainBroken(ChainDefect(sequence=count - 1, defect="hashMismatch"))
+        rows = self._db.execute(
+            "SELECT sequence, previous_hash, payload, hash FROM audit WHERE sequence >= ? ORDER BY sequence", (count,)
+        ).fetchall()
+        for sequence, previous_hash, payload, digest in rows:
+            if sequence != count:
+                raise AuditChainBroken(ChainDefect(sequence=count, defect="sequenceGap"))
+            if previous_hash != previous:
+                raise AuditChainBroken(ChainDefect(sequence=count, defect="previousHashMismatch"))
+            if digest != entry_hash(sequence, previous_hash, payload):
+                raise AuditChainBroken(ChainDefect(sequence=count, defect="hashMismatch"))
+            count, previous = count + 1, digest
+        self._verified = (count, previous)
+        return count, previous
+
+    def audit_count(self) -> int:
+        with self._lock:
+            return self._db.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
+
+    def audit_page(self, limit: int = 50, before: int | None = None) -> list[AuditEntry]:
+        """Newest first."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT sequence, previous_hash, payload, hash FROM audit WHERE sequence < ? "
+                "ORDER BY sequence DESC LIMIT ?",
+                (before if before is not None else 2**62, limit),
+            ).fetchall()
+        return [AuditEntry(sequence=r[0], previous_hash=r[1], payload=r[2], hash=r[3]) for r in rows]
 
     def audit_records(self) -> list[CheckRecord]:
         return [CheckRecord.model_validate_json(e.payload) for e in self.audit_entries()]

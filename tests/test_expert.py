@@ -264,4 +264,4 @@ def test_every_finding_has_a_description():
     for kind in PackFindingKind:
         assert describe_pack_finding(PackFinding(kind=kind, usable=1, required=3, count=2))
     lines = describe_result(result_with().result, LAYOUT, CATALOG)
-    assert len(lines) == 1 + len(LAYOUT.all_compartments) and "identity not checked" in lines[1]
+    assert len(lines) == 1 + len(LAYOUT.all_compartments) and "identity not checked automatically" in lines[1]

@@ -52,6 +52,8 @@ def test_audit_chain_persists_and_refuses_tampering(tmp_path):
     raw.execute("UPDATE audit SET payload = replace(payload, '\"MK\"', '\"ZZ\"') WHERE sequence = 0")
     raw.commit()
     raw.close()
+    with pytest.raises(AuditChainBroken):  # a new process verifies the whole chain before appending
+        Database(tmp_path).append_audit(record)
     assert db.verify_audit().defect == "hashMismatch"
     with pytest.raises(AuditChainBroken):
         db.append_audit(record)

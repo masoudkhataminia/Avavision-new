@@ -16,23 +16,29 @@ dependencies = [
   "pydantic==2.11.7",
   "fastapi==0.116.1",
   "uvicorn==0.35.0",
-  "anthropic>=0.60",                            # MIT; optional language-model expert
-  "pypdf>=5.0",                                 # BSD; reading medication lists from PDF
+  "anthropic>=1.12,<2",                         # MIT; the language-model expert (structured outputs, fallbacks)
 ]
 
 [project.optional-dependencies]
 dev = ["pytest==8.4.1", "ruff==0.12.4", "httpx==0.28.1"]
-desktop = ["pywebview>=5.4"]                    # BSD; native window using Edge WebView2
+desktop = [
+  "pywebview>=6.2",                             # BSD; native window using Edge WebView2
+  "keyring>=25",                                # MIT; API key in Windows Credential Manager
+]
+package = ["pyinstaller==6.22.3"]               # GPL with bootloader exception: the built app is not GPL
 
 [project.scripts]
 avavision = "avavision.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/avavision"]
+# The interface is built from web/ (git-ignored) and must still ship in the wheel.
+artifacts = ["src/avavision/station/ui/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+filterwarnings = ["ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning"]
 
 [tool.ruff]
 line-length = 120

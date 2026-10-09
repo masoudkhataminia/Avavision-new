@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
+  web:
+    name: Interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  windows-app:
+    name: Windows app
+    needs: [python, web]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the interface
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Install
+        run: |
+          python -m pip install ".[desktop,package]"
+          python -m pip uninstall -y onnxruntime
+          python -m pip install onnxruntime-directml==1.22.0
+      - run: pyinstaller --noconfirm packaging/AvaVision.spec
+      - name: Smoke test the packaged app
+        shell: pwsh
+        run: |
+          $cli = "dist/AvaVision/avavision-cli.exe"
+          $data = Join-Path $env:RUNNER_TEMP "station"
+          & $cli --data $data verify-audit
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $cli --data $data benchmark --frames 2
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $server = Start-Process -FilePath $cli -ArgumentList "--data", $data, "serve", "--demo", "--port", "8765" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 60 -and -not $ok; $i++) {
+            Start-Sleep -Seconds 1
+            try { $status = Invoke-RestMethod http://127.0.0.1:8765/api/status; $ok = $status.demo } catch {}
+          }
+          $page = Invoke-WebRequest http://127.0.0.1:8765/
+          Stop-Process -Id $server.Id
+          if (-not $ok) { throw "the packaged station did not start" }
+          if ($page.Content -notmatch "/assets/") { throw "the interface is missing from the package" }
+          Write-Output "providers: $($status.providers -join ', ')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AvaVision-windows
+          path: dist/AvaVision
+          retention-days: 14

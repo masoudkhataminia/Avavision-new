@@ -34,7 +34,7 @@ def describe_finding(f: Finding, catalog: Catalog) -> str:
         FindingKind.LOW_CONFIDENCE_OBJECT: "an object that could not be recognised with confidence",
         FindingKind.OBJECT_ON_BORDER: "an object on the border between compartments",
         FindingKind.UNSTABLE_ACROSS_FRAMES: "the photos disagree about this compartment",
-        FindingKind.IDENTITY_NOT_VERIFIED: "count matches; identity not checked automatically",
+        FindingKind.IDENTITY_NOT_VERIFIED: "identity not checked automatically",
         FindingKind.SUSPECTED_MEDICATION: f"a tablet that looks like {med}",
         FindingKind.UNRECOGNISED_PILL: "a tablet the brain does not recognise",
         FindingKind.CONFLICTING_IDENTITY: "the photos disagree about which medication this is",

@@ -43,3 +43,7 @@ training/runs/
 *.egg-info/
 /dist/
 /station-data/
+
+# Station interface: built from web/ into the package
+/src/avavision/station/ui/
+node_modules/
