@@ -14,6 +14,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 import cv2
@@ -44,7 +45,7 @@ from ..expert.claude import ClaudeExpert, ExpertCall, ExpertError, ExpertSetting
 from ..expert.describe import describe_finding, describe_pack_finding
 from ..storage.database import Database
 from ..vision.camera import CameraSettings, CameraSource, FrameSource, LiveFeed
-from ..vision.codes import read_codes
+from ..vision.codes import code_image, read_codes
 from ..vision.detector import OnnxDetector
 from ..vision.embedder import ClassicEmbedder, OnnxEmbedder
 from ..vision.pack_finder import FinderMode
@@ -53,6 +54,7 @@ from ..vision.runtime import available_providers, file_sha256
 from ..vision.segmentation import rectify
 from .credentials import load_api_key
 from .demo import DemoCamera, DemoFault, demo_catalog, demo_profile
+from .phone import PhoneCamera, PhoneLink, new_pairing_key
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 
@@ -61,15 +63,24 @@ class StationError(RuntimeError):
     """A request the station cannot carry out in its current state."""
 
 
+class CameraKind(StrEnum):
+    USB = "usb"  # a camera attached to this computer (OpenCV)
+    IPHONE = "iphone"  # an iPhone's Safari page over the local Wi-Fi; see station.phone
+
+
 class StationSettings(BaseModel):
     station_id: str = "station-1"
     layout_id: str = WEEKLY_7X4.id
     finder_mode: FinderMode = FinderMode.MARKERS
+    camera_source: CameraKind = CameraKind.USB
     camera_index: int = 0
     camera_width: int = 3840
     camera_height: int = 2160
     #: Manual exposure for a fixed station light; ``None`` keeps auto exposure.
     camera_exposure: float | None = None
+    #: Local-network ports of the iPhone camera page (HTTPS) and its one-time setup page (HTTP).
+    phone_port: int = 8766
+    phone_setup_port: int = 8767
     keep_evidence_images: bool = True
     expert_enabled: bool = True
     #: Language of the expert's explanations ("en" or "fa").
@@ -188,8 +199,10 @@ class Station:
         detector: OnnxDetector | None = None,
         model_note: str | None = None,
         expert: ClaudeExpert | None = None,
+        phone: PhoneLink | None = None,
     ):
         self.db = db
+        self.phone = phone
         self.settings = settings
         self.demo = demo
         self.model = model or builtin_pocket_segmenter()
@@ -222,6 +235,7 @@ class Station:
         db = Database(data_dir)
         settings = StationSettings.model_validate(db.setting("station") or {})
         demo_camera = None
+        phone = None
         if demo:
             demo_camera = DemoCamera()
             layout = demo_camera.station.layout()
@@ -236,6 +250,17 @@ class Station:
             if carded is not None:
                 demo_camera.show(carded)
             source: FrameSource = demo_camera
+        elif settings.camera_source == CameraKind.IPHONE:
+            camera = PhoneCamera()
+            key = db.setting("phone_key") or new_pairing_key()
+            db.save_setting("phone_key", key)
+            try:
+                phone = PhoneLink(
+                    data_dir / "phone", camera, key, port=settings.phone_port, setup_port=settings.phone_setup_port
+                )
+                source = camera
+            except Exception as error:  # certificates could not be made: say so instead of failing to start
+                source = NoCamera(f"the iPhone camera could not be prepared: {error}")
         else:
             try:
                 source = CameraSource(
@@ -262,6 +287,7 @@ class Station:
             detector=detector,
             model_note=model_note,
             expert=expert,
+            phone=phone,
         )
 
     # ------------------------------------------------------------------ lifecycle
@@ -270,6 +296,8 @@ class Station:
         if self._running:
             return
         self._running = True
+        if self.phone is not None:
+            self.phone.start()
         self.feed.start()
         self._live_thread = threading.Thread(target=self._live_loop, name="avavision-live", daemon=True)
         self._live_thread.start()
@@ -278,6 +306,8 @@ class Station:
         self._running = False
         if self._live_thread is not None:
             self._live_thread.join(timeout=2)
+        if self.phone is not None:
+            self.phone.stop()
         self.feed.stop()
         self.db.close()
 
@@ -324,12 +354,26 @@ class Station:
                 images.append(latest[0])
                 last = latest[1]
             elif time.time() > deadline:
-                raise StationError(self.camera_error or "the camera is not delivering frames")
+                raise StationError(self._camera_problem() or "the camera is not delivering frames")
             else:
                 time.sleep(0.005)
         return images
 
     # ------------------------------------------------------------------ status
+
+    @property
+    def camera_kind(self) -> str:
+        """The camera actually in use (a changed setting applies after a restart)."""
+        if self.demo is not None:
+            return "demo"
+        return CameraKind.IPHONE.value if self.phone is not None else CameraKind.USB.value
+
+    def _camera_problem(self) -> str | None:
+        if self.camera_error:
+            return self.camera_error
+        if self.phone is not None and not self.phone.camera.connected:
+            return self.phone.view()["problem"] or "iPhone not connected: open the AvaVision camera page on the iPhone"
+        return None
 
     def status(self) -> dict:
         embedder_providers = getattr(self.embedder, "providers", ["builtin"])
@@ -338,7 +382,7 @@ class Station:
             "station_id": self.settings.station_id,
             "demo": self.demo is not None,
             "layout": {"id": self.layout.id, "name": self.layout.display_name, "calibrated": self.layout.is_calibrated},
-            "camera": {"error": self.camera_error, "frames": self.feed.frames_read},
+            "camera": {"source": self.camera_kind, "error": self._camera_problem(), "frames": self.feed.frames_read},
             "providers": available_providers(),
             "embedder": {"id": self.embedder.id, "providers": embedder_providers, "note": self.embedder_note},
             "model": {
@@ -363,6 +407,31 @@ class Station:
 
     def live_view(self) -> dict | None:
         return asdict(self.live) if self.live else None
+
+    # ------------------------------------------------------------------ iPhone camera
+
+    def _phone(self) -> PhoneLink:
+        if self.phone is None:
+            raise StationError("the iPhone camera is not in use: choose it in Settings and restart the station")
+        return self.phone
+
+    def phone_view(self) -> dict:
+        return self._phone().view()
+
+    def phone_qr(self, which: str) -> bytes:
+        """QR code of the setup page or of the camera page (the latter carries the pairing key)."""
+        phone = self._phone()
+        url = {"setup": phone.setup_url, "camera": phone.camera_url}.get(which)
+        if url is None:
+            raise StationError("no local network address: connect this computer to the iPhone's Wi-Fi")
+        return cv2.imencode(".png", code_image(url, scale=8))[1].tobytes()
+
+    def pair_phone(self) -> dict:
+        """A new pairing key: the connected iPhone (and any copy of the old QR code) stops working."""
+        phone = self._phone()
+        phone.pair_again()
+        self.db.save_setting("phone_key", phone.key)
+        return phone.view()
 
     def latest_jpeg(self, width: int = 1280, quality: int = 75) -> bytes | None:
         latest = self.feed.latest()

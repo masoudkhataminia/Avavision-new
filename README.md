@@ -42,6 +42,7 @@ cd web && npm ci && npm run build && cd ..
 
 avavision desktop --demo               # پنجره‌ی ایستگاه با دوربین نمایشی (بدون سخت‌افزار)
 avavision desktop                      # با دوربین واقعی
+                                       # یا با آیفون از راه Wi-Fi: Settings ← Camera ← iPhone over Wi-Fi
 avavision fetch-models                 # نصب چشم DINOv2 (یک بار، ۸۸ مگابایت)
 avavision benchmark                    # اندازه‌گیری سرعت روی همین کامپیوتر
 ```

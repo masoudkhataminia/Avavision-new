@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>AvaVision camera</title>
+<style>
+  body { font: 17px/1.4 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background: #10151b; color: #eef2f6; }
+  main { max-width: 36rem; margin: 0 auto; display: grid; gap: 12px; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  #state { padding: 12px 14px; border-radius: 12px; background: #24303c; font-weight: 600; }
+  #state.ok { background: #145c32; }
+  #state.bad { background: #7a1f1f; }
+  button { font: inherit; font-weight: 600; padding: 14px; border-radius: 12px; border: 0; background: #0a66c2; color: #fff; }
+  button[hidden] { display: none; }
+  select { font: inherit; padding: 10px; border-radius: 10px; width: 100%; }
+  video { width: 100%; border-radius: 12px; background: #000; }
+  .muted { color: #9aa7b4; font-size: 0.88rem; }
+  #stats { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AvaVision camera</h1>
+  <div id="state">Not started</div>
+  <button id="start">Start camera</button>
+  <label class="muted" id="lens-label" hidden>Lens
+    <select id="lens"></select>
+  </label>
+  <video id="preview" playsinline muted autoplay></video>
+  <div id="stats" class="muted"></div>
+  <p class="muted">Keep this page open with the phone on its stand, pointing straight down at the tray, and plugged
+    in. If the screen goes dark, set Settings → Display &amp; Brightness → Auto-Lock to Never.</p>
+</main>
+<script>
+"use strict";
+const STORE = "avavision-pairing-key";
+const state = document.getElementById("state");
+const startButton = document.getElementById("start");
+const lens = document.getElementById("lens");
+const lensLabel = document.getElementById("lens-label");
+const preview = document.getElementById("preview");
+const stats = document.getElementById("stats");
+const canvas = document.createElement("canvas");
+const context = canvas.getContext("2d");
+
+const fromLink = (location.hash.match(/k=([A-Za-z0-9_-]+)/) || [])[1];
+if (fromLink) {
+  localStorage.setItem(STORE, fromLink);
+  history.replaceState(null, "", location.pathname);  // keep the key out of screenshots and history
+}
+const key = localStorage.getItem(STORE);
+
+let stream = null, socket = null, waiting = false, sentAt = 0, acknowledged = 0, perSecond = 0, running = false;
+let wakeLock = null, retry = null;
+
+function show(text, kind) {
+  state.textContent = text;
+  state.className = kind || "";
+}
+
+function track() {
+  return stream ? stream.getVideoTracks()[0] : null;
+}
+
+async function openCamera(deviceId) {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  const video = { width: { ideal: 3840 }, height: { ideal: 2160 } };
+  if (deviceId) video.deviceId = { exact: deviceId };
+  else video.facingMode = { ideal: "environment" };
+  stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: video });
+  preview.srcObject = stream;
+  await preview.play();
+}
+
+/** The plain wide lens: the automatic multi-lens cameras may switch lenses (and field of view) mid-check. */
+function preferredLens(cameras) {
+  const avoid = ["front", "ultra", "tele", "dual", "triple"];
+  return cameras.find((c) => {
+    const label = c.label.toLowerCase();
+    return label.includes("back") && !avoid.some((word) => label.includes(word));
+  });
+}
+
+async function chooseLens() {
+  const cameras = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+  const current = track() ? track().getSettings().deviceId : null;
+  const wanted = preferredLens(cameras);
+  if (wanted && wanted.deviceId !== current) await openCamera(wanted.deviceId);
+  lens.innerHTML = "";
+  for (const camera of cameras) {
+    const option = document.createElement("option");
+    option.value = camera.deviceId;
+    option.textContent = camera.label || "Camera";
+    option.selected = track() && camera.deviceId === track().getSettings().deviceId;
+    lens.appendChild(option);
+  }
+  lensLabel.hidden = cameras.length < 2;
+}
+
+function connect() {
+  clearTimeout(retry);
+  socket = new WebSocket("wss://" + location.host + "/camera/stream");
+  socket.onopen = () => {
+    const settings = track() ? track().getSettings() : {};
+    socket.send(JSON.stringify({ key: key, device: (track() ? track().label : "iPhone") + " · " + settings.width + "×" + settings.height }));
+    waiting = false;
+    show("Connected: sending pictures to the station", "ok");
+    pump();
+  };
+  socket.onmessage = (event) => {
+    if (event.data === "ok" || event.data === "bad") {
+      waiting = false;
+      acknowledged += 1;
+      pump();
+    }
+  };
+  socket.onclose = (event) => {
+    waiting = false;
+    if (event.code === 4401) {
+      localStorage.removeItem(STORE);
+      running = false;
+      show("This phone is not paired any more. Scan the Camera QR code on the station again.", "bad");
+      return;
+    }
+    if (event.code === 4409) {
+      running = false;
+      show("Another phone is now the station camera.", "bad");
+      return;
+    }
+    if (running) {
+      show("Connection lost, reconnecting…", "bad");
+      retry = setTimeout(connect, 2000);
+    }
+  };
+}
+
+function pump() {
+  if (waiting || !socket || socket.readyState !== WebSocket.OPEN) return;
+  const width = preview.videoWidth, height = preview.videoHeight;
+  if (!width || !height) {
+    setTimeout(pump, 200);
+    return;
+  }
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  context.drawImage(preview, 0, 0, width, height);
+  waiting = true;
+  sentAt = performance.now();
+  canvas.toBlob((blob) => {
+    if (!blob || !socket || socket.readyState !== WebSocket.OPEN) {
+      waiting = false;
+      setTimeout(pump, 200);
+      return;
+    }
+    socket.send(blob);
+  }, "image/jpeg", 0.92);
+}
+
+async function keepAwake() {
+  try {
+    if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+  } catch (error) {
+    /* not available: the Auto-Lock tip on the page applies */
+  }
+}
+
+async function start() {
+  if (!key) {
+    show("Scan the Camera QR code on the station (Settings → iPhone camera) to pair this phone.", "bad");
+    return;
+  }
+  if (!navigator.mediaDevices || !window.isSecureContext) {
+    show("The camera is blocked: open this page in Safari after trusting the station certificate (setup page).", "bad");
+    return;
+  }
+  try {
+    show("Opening the camera…");
+    await openCamera(null);
+    await chooseLens();
+  } catch (error) {
+    show("The camera could not be opened: " + error.name + ". Allow camera access for this site in Safari.", "bad");
+    return;
+  }
+  running = true;
+  startButton.hidden = true;
+  keepAwake();
+  connect();
+}
+
+startButton.addEventListener("click", start);
+lens.addEventListener("change", async () => {
+  await openCamera(lens.value);
+  if (socket) socket.close();  // reconnect so the station sees the new lens
+});
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || !running) return;
+  keepAwake();
+  if (!track() || track().readyState === "ended") {
+    await openCamera(lens.value || null);
+    if (socket) socket.close();
+  }
+});
+
+setInterval(() => {
+  if (waiting && socket && performance.now() - sentAt > 8000) socket.close();  // stuck: start a fresh connection
+  if (!running) return;
+  const settings = track() ? track().getSettings() : {};
+  stats.textContent = (settings.width || "?") + "×" + (settings.height || "?") + " · " +
+    (acknowledged - perSecond) + " pictures/s · " + acknowledged + " sent";
+  perSecond = acknowledged;
+}, 1000);
+
+if (!key) show("Scan the Camera QR code on the station (Settings → iPhone camera) to pair this phone.", "bad");
+</script>
+</body>
+</html>

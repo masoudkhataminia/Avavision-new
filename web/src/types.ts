@@ -5,7 +5,7 @@ export type Status = {
   station_id: string;
   demo: boolean;
   layout: { id: string; name: string; calibrated: boolean };
-  camera: { error: string | null; frames: number };
+  camera: { source: "usb" | "iphone" | "demo"; error: string | null; frames: number };
   providers: string[];
   embedder: { id: string; providers: string[]; note: string | null };
   model: { id: string; version: string; capability: string };
@@ -187,10 +187,13 @@ export type Settings = {
   station_id: string;
   layout_id: string;
   finder_mode: "markers" | "outline";
+  camera_source: "usb" | "iphone";
   camera_index: number;
   camera_width: number;
   camera_height: number;
   camera_exposure: number | null;
+  phone_port: number;
+  phone_setup_port: number;
   keep_evidence_images: boolean;
   expert_enabled: boolean;
   language: string;
@@ -203,4 +206,18 @@ export type Settings = {
     max_tokens: number;
     timeout_seconds: number;
   };
+};
+
+export type PhoneView = {
+  connected: boolean;
+  device: string | null;
+  resolution: [number, number] | null;
+  fps: number;
+  frames: number;
+  seconds_since_frame: number | null;
+  address: string | null;
+  setup_url: string | null;
+  ports: { camera: number; setup: number };
+  fingerprint: string;
+  problem: string | null;
 };

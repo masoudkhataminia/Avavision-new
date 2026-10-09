@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AvaVision · iPhone setup</title>
+<style>
+  body { font: 17px/1.45 -apple-system, system-ui, sans-serif; margin: 0; padding: 20px; background: #f4f6f8; color: #18202a; }
+  main { max-width: 34rem; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.3rem; }
+  ol { padding-left: 1.3rem; }
+  li { margin: 0.8rem 0; }
+  .button { display: block; text-align: center; background: #0a66c2; color: #fff; border-radius: 12px; padding: 14px;
+            text-decoration: none; font-weight: 600; margin: 1rem 0; }
+  .muted { color: #5b6773; font-size: 0.9rem; }
+  code { word-break: break-all; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AvaVision iPhone camera</h1>
+  <p class="muted">One-time setup. Safari lets a page use the camera only over a secure connection, so this iPhone
+    must trust the station's own certificate first.</p>
+  <a class="button" href="/avavision-ca.crt">1. Download the station certificate</a>
+  <ol start="2">
+    <li>Safari asks to download a configuration profile: tap <b>Allow</b>.</li>
+    <li>Open <b>Settings</b> → <b>Profile Downloaded</b> (or General → VPN &amp; Device Management) →
+      <b>AvaVision station</b> → <b>Install</b>.</li>
+    <li>Open <b>Settings</b> → General → About → <b>Certificate Trust Settings</b> and switch on
+      <b>AvaVision station (local network only)</b>.</li>
+    <li>On the station computer, open Settings → iPhone camera and scan the <b>Camera</b> QR code with this
+      iPhone's Camera app. Open the link in <b>Safari</b>.</li>
+  </ol>
+  <p class="muted">This certificate can only vouch for addresses inside your local network, never for web sites.
+    Its fingerprint (SHA-256) must match the one on the station's screen:</p>
+  <p><code>{{fingerprint}}</code></p>
+</main>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { PhonePanel } from "../components/PhonePanel";
 import { useAction, useData } from "../hooks";
 import type { Layout, Settings, Status } from "../types";
 
@@ -92,7 +93,22 @@ export function SettingsPage({ status, onChange }: { status: Status | null; onCh
             </label>
           </div>
           <h3>Camera</h3>
-          <div className="row">
+          <label>
+            Camera
+            <select
+              value={settings.camera_source}
+              disabled={status?.demo}
+              onChange={(e) => set("camera_source", e.target.value as Settings["camera_source"])}
+            >
+              <option value="usb">Camera attached to this computer</option>
+              <option value="iphone">iPhone over Wi-Fi (Safari, no app)</option>
+            </select>
+          </label>
+          {settings.camera_source !== status?.camera.source && !status?.demo && (
+            <div className="small muted">Save, then restart the station to switch the camera.</div>
+          )}
+          {status?.camera.source === "iphone" && <PhonePanel />}
+          <div className="row" hidden={settings.camera_source !== "usb"}>
             <label>
               Camera number
               <input type="number" min={0} value={settings.camera_index} onChange={(e) => set("camera_index", Number(e.target.value))} />

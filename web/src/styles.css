@@ -435,3 +435,7 @@ img.thumb {
   border-radius: var(--radius);
   border: 1px solid var(--line);
 }
+
+[hidden] {
+  display: none !important;
+}

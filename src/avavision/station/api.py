@@ -179,6 +179,20 @@ def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | 
     def markers():
         return Response(cv2.imencode(".png", marker_sheet())[1].tobytes(), media_type="image/png")
 
+    # ------------------------------------------------------------------ iPhone camera
+
+    @app.get("/api/phone")
+    def phone():
+        return station.phone_view()
+
+    @app.get("/api/phone/{which}.png")
+    def phone_qr(which: str):
+        return Response(station.phone_qr(which), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/phone/pair")
+    def phone_pair():
+        return station.pair_phone()
+
     # ------------------------------------------------------------------ settings
 
     @app.get("/api/settings")
