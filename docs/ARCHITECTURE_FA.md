@@ -12,6 +12,8 @@ flowchart TD
     R --> O["FrameObservation"]
     M --> O
     Q --> O
+    F --> B["مغز: چشم + حافظه + اعتماد"]
+    B --> O
     O --> S["CheckSession"]
     S --> E["VerificationEngine"]
     G["ReleaseGate + ModelManifest"] --> E
@@ -47,6 +49,21 @@ flowchart TD
 | `Review/PharmacistSignOff.swift` | قوانین امضای داروساز |
 | `Audit/AuditLog.swift` | ثبت زنجیره‌ای و ضد دستکاری هر بررسی |
 | `Session/CheckSession.swift` | چرخه‌ی یک بررسی: عکس‌برداری ← تحلیل ← امضا ← رکورد |
+| `Brain/*` | مغز یادگیرنده: حافظه، شناسایی open-set، کالیبراسیون، دفتر اعتماد، برنامه‌ی یادگیری ([جزئیات](BRAIN_FA.md)) |
+| `Model/EmbedderManifest.swift` | هویت و بررسی سلامت چشم Core ML اختصاصی |
+
+## اجزای اپ مربوط به هوش مصنوعی
+
+| فایل | کار |
+|---|---|
+| `Services/ObjectDetectors.swift` | مدل تشخیص Core ML، یا segmenter بدون‌آموزش روز اول (Vision + روش کلاسیک) |
+| `Services/PillEmbedder.swift` | چشم: Apple feature print یا مدل Core ML اختصاصی |
+| `Services/PillCrops.swift` | برش هر قرص و پرسیدن نظر مغز |
+| `Services/BrainStore.swift` | ذخیره‌ی مغز و تصاویر تک‌قرص، خروجی برای آموزش |
+| `Features/Brain/BrainViews.swift` | داشبورد مغز، آموزش دارو، صف برچسب‌زدن |
+| `training/` | آموزش آفلاین چشم اختصاصی (Python) |
+
+جریان یک بررسی: تصویر زنده فقط جای پک و کیفیت را می‌سنجد. وقتی سه عکس خوب جمع شد، روی همان سه عکس قرص‌ها پیدا و از مغز پرسیده می‌شوند، سپس موتور تصمیم اجرا می‌شود. بعد از امضای داروساز، مغز از خانه‌های تأییدشده یاد می‌گیرد.
 
 ## مختصات
 
@@ -61,4 +78,6 @@ flowchart TD
 - `catalog.json`، `profiles.json`، `layouts.json`
 - `audit/audit-log.jsonl` — هر خط یک `AuditEntry` با hash خودش و hash قبلی
 
-عکس‌ها ذخیره نمی‌شوند (ممکن است برچسب پک نام بیمار داشته باشد). فقط SHA-256 پیکسل‌های تحلیل‌شده در Audit می‌ماند.
+- `brain/brain.json` و `brain/crops/` — حافظه‌ی مغز و تصاویر تک‌قرص (رمزگذاری کامل، بیرون از Backup)
+
+عکس کل پک ذخیره نمی‌شود (ممکن است برچسب پک نام بیمار داشته باشد). فقط SHA-256 پیکسل‌های تحلیل‌شده در Audit می‌ماند.

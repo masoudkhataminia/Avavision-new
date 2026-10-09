@@ -47,7 +47,21 @@ cd App && xcodegen generate && open AvaVision.xcodeproj
 | 10 | امضا بدون بررسی همه‌ی خانه‌های پرچم‌دار | پیام خطا، ثبت نمی‌شود |
 | 11 | Release و سپس Audit trail | رکورد با «Audit chain intact» |
 
-## ۵. کالیبراسیون قبل از Pilot
+## ۵. سناریوهای مغز
+
+| # | سناریو | نتیجه‌ی مورد انتظار |
+|---|---|---|
+| B1 | Brain ← Teach a medication برای ۲ دارو، هر کدام ۲ عکس از ۸ قرص | Calibration: «Calibrated»؛ هر دارو «Learning» |
+| B2 | پک با قرص داروی آموزش‌دیده‌ی دیگر در یک خانه | آن خانه نارنجی با پیام «brain thinks a pill here looks like…» |
+| B3 | امضای Release با «Correct» برای خانه‌های تک‌دارویی | پیام «The brain learned N new pill images» |
+| B4 | خانه‌ی چنددارویی تأییدشده | یک مورد در Brain ← Pills waiting for labels |
+| B5 | Brain ← Export training data | پوشه در Files ← On My iPhone ← AvaVision |
+| B6 | ۱۰۰+ شناسایی درست پیاپی یک دارو | وضعیت دارو «Trusted»؛ خانه‌های آن دارو سبز (با Layout کالیبره) |
+| B7 | یک شناسایی غلط بعد از Trusted | وضعیت «Suspended» |
+
+نکته: segmenter روز اول روی Simulator کند است (حدود ۲۰ ثانیه برای یک عکس). روی iPhone با Neural Engine سرعتش باید اندازه‌گیری و ثبت شود.
+
+## ۶. کالیبراسیون قبل از Pilot
 
 ۱. ابعاد کارت پک را با کولیس اندازه بگیرید (میلی‌متر).
 ۲. در **Settings ← Pack layout** ابعاد و ناحیه‌ی شبکه را وارد کنید تا خطوط شبکه دقیقاً روی دیواره‌های خانه‌ها بیفتد.

@@ -20,6 +20,7 @@ class PillEmbedder(nn.Module):
     def __init__(self, backbone: str = DEFAULT_BACKBONE, embedding_size: int | None = 256):
         super().__init__()
         self.backbone = AutoModel.from_pretrained(backbone)
+        _freeze_position_embeddings(self.backbone, IMAGE_SIZE)
         hidden = self.backbone.config.hidden_size
         self.head = nn.Linear(hidden, embedding_size) if embedding_size else nn.Identity()
         self.embedding_size = embedding_size or hidden
@@ -49,15 +50,15 @@ class ExportWrapper(nn.Module):
         self.embedder = embedder.eval()
         self.register_buffer("mean", torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1) * 255)
         self.register_buffer("std", torch.tensor(IMAGENET_STD).view(1, 3, 1, 1) * 255)
-        _freeze_position_embeddings(self.embedder.backbone, IMAGE_SIZE)
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return self.embedder((image - self.mean) / self.std)
 
 
 def _freeze_position_embeddings(backbone: nn.Module, size: int) -> None:
-    """DINOv2 interpolates its position embeddings bicubically for every input size, which Core ML
-    cannot convert. The app always uses ``size``×``size``, so the interpolation is done once here."""
+    """DINOv2 interpolates its position embeddings bicubically (with antialiasing) on every forward pass.
+    Neither Core ML nor Apple's GPU backend (MPS) supports that operation. Training and the app always use
+    ``size``×``size`` inputs, so the interpolation is done once, on the CPU, when the model is built."""
     embeddings = backbone.embeddings
     patches = (size // backbone.config.patch_size) ** 2
     with torch.no_grad():

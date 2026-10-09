@@ -1,5 +1,7 @@
 # راهنمای مدل
 
+> **بدون مدل هم اپ می‌شمارد:** segmenter داخلی (Apple Vision + روش کلاسیک) با وضعیت count-only کار می‌کند. این راهنما برای مدل تشخیص اختصاصی است. چشم مغز در [راهنمای آموزش](TRAINING_GUIDE_FA.md) آمده.
+
 اپ به هیچ مدل یا کتابخانه‌ی خاصی وابسته نیست. هر مدل **Core ML Object Detection** که خروجی `VNRecognizedObjectObservation` بدهد کار می‌کند (Create ML، یا مدل‌های دیگر با NMS داخلی).
 
 ## انتخاب ابزار آموزش و مجوز
@@ -7,8 +9,9 @@
 | گزینه | مجوز | نکته |
 |---|---|---|
 | **Create ML** (اپ رایگان اپل روی Mac) | بدون محدودیت تجاری | ساده‌ترین شروع؛ خروجی مستقیم Core ML. پیشنهاد برای نسخه‌ی اول |
-| Ultralytics YOLO | AGPL-3.0 یا Enterprise License | برای اپ تجاری بسته، بدون لایسنس Enterprise مجاز فرض نمی‌شود |
-| مدل‌های Apache/MIT (مثلاً RT-DETR، YOLOX) | آزاد | نیاز به تبدیل به Core ML با coremltools |
+| **RF-DETR Nano/Small/Medium** | Apache-2.0 | پیشنهاد تحقیق؛ خروجی رسمی Core ML (`rfdetr[coreml]`). اندازه‌های Atto/Femto/Pico/XL/2XL مجوز PML-1.0 دارند و ممنوع‌اند |
+| Ultralytics YOLO، DEIMv2 | AGPL-3.0 / غیرتجاری | ممنوع (D-116) |
+| RT-DETRv2، D-FINE | Apache-2.0 | ممکن، ولی تبدیل به Core ML دستی است |
 
 ## ساخت مدل با Create ML (خلاصه)
 

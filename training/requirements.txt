@@ -1,7 +1,7 @@
 # Offline training for AvaVision (Mac with Apple Silicon or a CUDA machine).
 # Every dependency is permissively licensed (BSD / Apache-2.0 / MIT); never add AGPL packages.
-torch==2.7.1
-torchvision==0.22.1
+torch==2.7.0                  # the newest version coremltools 9.0 is tested with
+torchvision==0.22.0
 transformers==4.53.2          # DINOv2 backbone (weights: Apache-2.0)
 pytorch-metric-learning==2.9.0  # MIT
 coremltools==9.0              # BSD-3, export to Core ML
