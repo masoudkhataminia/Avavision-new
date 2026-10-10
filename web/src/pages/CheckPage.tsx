@@ -159,7 +159,22 @@ export function CheckPage({
       resetReview();
       update(null);
     });
-  const secondOpinion = () => run("review", async () => update(await api.post<CheckView>("/api/check/review", {})));
+  const secondOpinion = (advisor: "claude" | "local") =>
+    run("review", async () => update(await api.post<CheckView>("/api/check/review", { advisor })));
+  const stopReview = () => run("stop", async () => update(await api.post<CheckView>("/api/check/review/stop")));
+
+  // Second opinions arrive one compartment at a time: follow them while they run.
+  const following = check?.reviewing != null || busy === "review";
+  useEffect(() => {
+    if (!following) return;
+    const timer = window.setInterval(() => {
+      api
+        .get<CheckView | null>("/api/check")
+        .then((view) => view && view.phase === "analyzed" && setCheck(view))
+        .catch(() => undefined);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [following]);
   const explain = () => run("explain", async () => update(await api.post<CheckView>("/api/check/explain")));
   const injectFault = (value: string) =>
     run("fault", async () => {
@@ -195,6 +210,7 @@ export function CheckPage({
     unresolved.length > 0 && `${unresolved.length} compartment(s) unresolved`,
     result?.has_pack_findings && !acknowledged && "acknowledge the pack findings",
     result?.status === "retakeRequired" && "retake the photos",
+    check?.reviewing && `wait for the second opinion (${check.reviewing.done} of ${check.reviewing.total})`,
   ].filter(Boolean) as string[];
   const current = useMemo(() => compartments.find((c) => key(c) === selected) ?? null, [compartments, selected]);
 
@@ -286,29 +302,55 @@ export function CheckPage({
           check={check}
           selected={selected}
           footer={
-            <div className="row" style={{ flexWrap: "nowrap", gap: 6 }}>
-              <span
-                className="small faint ellipsis"
-                style={{ flex: 1 }}
-                title={result?.capability === "identity" ? "Identity model" : "Count model: identity is checked by you"}
-              >
-                {typeof check.timings.total_ms === "number" && `${(check.timings.total_ms / 1000).toFixed(1)} s`}
-              </span>
-              {status?.expert.enabled && (
-                <>
-                  <button className="ghost compact" onClick={secondOpinion} disabled={busy !== null || !check.evidence}>
-                    <Icon name="sparkles" size={16} />
-                    {busy === "review" ? "Asking…" : "Second opinion"}
-                  </button>
-                  <button className="ghost compact" onClick={explain} disabled={busy !== null}>
-                    <Icon name="info" size={16} />
-                    {busy === "explain" ? "Explaining…" : "Explain"}
-                  </button>
-                </>
+            <div className="stack" style={{ gap: 10 }}>
+              <div className="row" style={{ flexWrap: "nowrap", gap: 6 }}>
+                <span
+                  className="small faint ellipsis"
+                  style={{ flex: 1 }}
+                  title={
+                    result?.capability === "identity" ? "Identity model" : "Count model: identity is checked by you"
+                  }
+                >
+                  {typeof check.timings.total_ms === "number" &&
+                    `Analysed in ${(check.timings.total_ms / 1000).toFixed(1)} s`}
+                </span>
+                <button className="compact" onClick={retake} disabled={busy !== null}>
+                  <Icon name="rotate-ccw" size={16} /> Retake
+                </button>
+              </div>
+              {(status?.expert.enabled || status?.local_advisor.enabled) && (
+                <div className="row" style={{ flexWrap: "nowrap", gap: 6 }}>
+                  <span className="small faint" style={{ flex: 1 }}>
+                    Ask for
+                  </span>
+                  {status?.local_advisor.enabled && (
+                    <button
+                      className="ghost compact"
+                      onClick={() => secondOpinion("local")}
+                      disabled={busy !== null || !!check.reviewing}
+                      title={`${status.local_advisor.model}, running on this computer`}
+                    >
+                      <Icon name="layers" size={16} /> Offline opinion
+                    </button>
+                  )}
+                  {status?.expert.enabled && (
+                    <>
+                      <button
+                        className="ghost compact"
+                        onClick={() => secondOpinion("claude")}
+                        disabled={busy !== null || !!check.reviewing}
+                        title={status.expert.model}
+                      >
+                        <Icon name="sparkles" size={16} /> Claude opinion
+                      </button>
+                      <button className="ghost compact" onClick={explain} disabled={busy !== null}>
+                        <Icon name="info" size={16} />
+                        {busy === "explain" ? "Explaining…" : "Explain"}
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
-              <button className="compact" onClick={retake} disabled={busy !== null}>
-                <Icon name="rotate-ccw" size={16} /> Retake
-              </button>
             </div>
           }
         />
@@ -634,6 +676,28 @@ export function CheckPage({
           <Icon name="shield-check" size={16} /> Release pack
         </button>
       </div>
+      {check.reviewing && (
+        <div className="insight small" style={{ alignItems: "center" }}>
+          <Icon name="sparkles" size={16} />
+          <span className="stack" style={{ gap: 6, flex: 1 }}>
+            <span>
+              Second opinion from {check.reviewing.advisor}: {check.reviewing.done} of {check.reviewing.total}
+              {check.reviewing.stop && " · stopping"}
+            </span>
+            <span className="meter">
+              <span
+                style={{
+                  width: `${Math.round((100 * check.reviewing.done) / Math.max(1, check.reviewing.total))}%`,
+                  background: "var(--accent)",
+                }}
+              />
+            </span>
+          </span>
+          <button className="ghost compact" onClick={stopReview} disabled={check.reviewing.stop || busy === "stop"}>
+            Stop
+          </button>
+        </div>
+      )}
       {releaseBlockers.length > 0 && <div className="small faint">To release: {releaseBlockers.join(" · ")}</div>}
       {check.review_errors.length > 0 && <div className="error small">{check.review_errors.join("; ")}</div>}
     </div>

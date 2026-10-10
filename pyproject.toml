@@ -20,6 +20,7 @@ dependencies = [
   "zxing-cpp==3.1.1",                           # Apache-2.0; header-card QR codes and barcodes
   "cryptography==50.0.1",                       # Apache-2.0 OR BSD-3-Clause; certificates for the iPhone camera
   "wsproto==1.3.2",                             # MIT; WebSocket the iPhone camera streams over
+  "httpx>=0.28,<1",                             # BSD-3-Clause; the local vision model (Ollama); anthropic uses it too
 ]
 
 [project.optional-dependencies]

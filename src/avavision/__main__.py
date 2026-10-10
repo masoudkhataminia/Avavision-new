@@ -203,6 +203,53 @@ def _markers(args) -> None:
     print(f"marker sheet written to {args.out} (print at 100%, cut out, stick ids 0-3 clockwise from top-left)")
 
 
+def _compare_advisors(args) -> None:
+    """Second-opinion advisors scored on the compartments pharmacists already confirmed or corrected."""
+    import csv
+
+    import cv2
+
+    from .core.audit import CheckRecord
+    from .expert.claude import ClaudeExpert
+    from .expert.compare import compare_advisors, report, samples_from_records
+    from .expert.local import LocalVisionAdvisor
+    from .station.credentials import load_api_key
+    from .station.service import StationSettings
+    from .storage.database import Database
+
+    db = Database(args.data)
+    settings = StationSettings.model_validate(db.setting("station") or {})
+    records = [CheckRecord.model_validate_json(entry.payload) for entry in db.audit_entries()]
+
+    def load(name: str):
+        path = db.evidence / name
+        return cv2.imread(str(path)) if path.is_file() else None
+
+    samples = samples_from_records(records, load)
+    if args.limit:
+        wrong = [s for s in samples if not s.correct]
+        samples = wrong + [s for s in samples if s.correct][: max(0, args.limit - len(wrong))]
+    if not samples:
+        sys.exit("no signed-off check with an evidence photo and reviewed compartments yet")
+    advisors = {}
+    for name in args.advisor or ["local"]:
+        if name == "local":
+            local = settings.local_advisor.model_copy(update={"model": args.model or settings.local_advisor.model})
+            advisors[f"{local.model} (local)"] = LocalVisionAdvisor(local)
+        else:
+            advisors[settings.expert.model] = ClaudeExpert(settings.expert, api_key=load_api_key(db))
+    wrong = sum(not s.correct for s in samples)
+    print(f"{len(samples)} compartments from {len(records)} checks: {wrong} wrong, {len(samples) - wrong} correct")
+    scores, rows = compare_advisors(advisors, samples, db.catalog())
+    print(report(scores))
+    if args.csv:
+        with open(args.csv, "w", newline="", encoding="utf-8") as out:
+            writer = csv.DictWriter(out, fieldnames=list(rows[0].model_dump()))
+            writer.writeheader()
+            writer.writerows(r.model_dump() for r in rows)
+        print(f"every answer written to {args.csv}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="avavision", description="AvaVision pack-verification station")
     parser.add_argument("--version", action="version", version=__version__)
@@ -229,6 +276,13 @@ def main(argv: list[str] | None = None) -> None:
     gate.add_argument("model")
     markers = commands.add_parser("markers", help="write the printable tray marker sheet")
     markers.add_argument("--out", default="avavision-markers.png")
+    advisors = commands.add_parser(
+        "compare-advisors", help="score second-opinion advisors on compartments pharmacists already checked"
+    )
+    advisors.add_argument("--advisor", action="append", choices=["local", "claude"], help="repeat to compare")
+    advisors.add_argument("--model", help="local model to try instead of the one in settings")
+    advisors.add_argument("--limit", type=int, default=0, help="every wrong compartment plus correct ones up to this")
+    advisors.add_argument("--csv", help="write every answer to this file")
 
     args = parser.parse_args(argv)
     if args.command in ("serve", "desktop"):
@@ -247,6 +301,8 @@ def main(argv: list[str] | None = None) -> None:
         _gate(args)
     elif args.command == "markers":
         _markers(args)
+    elif args.command == "compare-advisors":
+        _compare_advisors(args)
 
 
 if __name__ == "__main__":

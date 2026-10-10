@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { PhonePanel } from "../components/PhonePanel";
 import { useAction, useData } from "../hooks";
-import type { Layout, Settings, Status } from "../types";
+import type { Layout, LocalAdvisorSettings, LocalAdvisorStatus, Settings, Status } from "../types";
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 export function SettingsPage({ status, onChange }: { status: Status | null; onChange: () => void }) {
   const { data: loaded, reload } = useData<Settings>("/api/settings");
   const { data: layouts, reload: reloadLayouts } = useData<Layout[]>("/api/layouts");
+  const { data: local } = useData<LocalAdvisorStatus>("/api/advisor/local", 5000);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -26,6 +27,8 @@ export function SettingsPage({ status, onChange }: { status: Status | null; onCh
   const set = <K extends keyof Settings>(field: K, value: Settings[K]) => setSettings({ ...settings, [field]: value });
   const setExpert = (field: keyof Settings["expert"], value: string | number | boolean) =>
     setSettings({ ...settings, expert: { ...settings.expert, [field]: value } });
+  const setLocal = (field: keyof LocalAdvisorSettings, value: string | boolean) =>
+    setSettings({ ...settings, local_advisor: { ...settings.local_advisor, [field]: value } });
 
   const save = () =>
     run("save", async () => {
@@ -185,6 +188,43 @@ export function SettingsPage({ status, onChange }: { status: Status | null; onCh
               Remove
             </button>
           </div>
+          <h3>Offline model (second opinions without internet)</h3>
+          <p className="small muted" style={{ margin: 0 }}>
+            A vision model running in Ollama on this computer or the pharmacy network, Qwen3-VL by default. Like the
+            expert it can only send compartments to review, never accept them. Install Ollama, then run{" "}
+            <kbd>ollama pull {settings.local_advisor.model}</kbd>.
+          </p>
+          <label className="inline">
+            <input
+              type="checkbox"
+              checked={settings.local_advisor.enabled}
+              onChange={(e) => setLocal("enabled", e.target.checked)}
+            />
+            Use the offline model for second opinions
+          </label>
+          <div className="row">
+            <label style={{ flex: 1 }}>
+              Ollama address
+              <input value={settings.local_advisor.url} onChange={(e) => setLocal("url", e.target.value)} />
+            </label>
+            <label style={{ flex: 1 }}>
+              Model
+              <input value={settings.local_advisor.model} onChange={(e) => setLocal("model", e.target.value)} />
+            </label>
+          </div>
+          <label className="inline">
+            <input
+              type="checkbox"
+              checked={settings.local_advisor.automatic}
+              onChange={(e) => setLocal("automatic", e.target.checked)}
+            />
+            Ask it about every accepted compartment right after capture (needs a graphics card)
+          </label>
+          {local?.enabled && (
+            <div className={local.problem ? "error small" : "notice small"}>
+              {local.problem ?? `Ollama is running and ${settings.local_advisor.model} is installed.`}
+            </div>
+          )}
           <div className="row">
             <button className="primary" disabled={busy !== null} onClick={save}>
               Save settings

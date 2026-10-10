@@ -11,6 +11,7 @@ export type Status = {
   model: { id: string; version: string; capability: string };
   brain: { exemplar_count: number; known_medications: number; trusted_medications: string[] };
   expert: { enabled: boolean; model: string; fallbacks: boolean; key: boolean };
+  local_advisor: { enabled: boolean; model: string; automatic: boolean };
   audit: { entries: number; defect: { sequence: number; defect: string } | null };
   check: string | null;
 };
@@ -106,6 +107,7 @@ export type CheckView = {
   explanation: { summary: string; steps: string[] } | null;
   advisories: Advisory[];
   review_errors: string[];
+  reviewing: { advisor: string; total: number; done: number; stop: boolean } | null;
   expert_calls: { served_model: string; fallback_used: boolean; seconds: number }[];
   record_id: string | null;
   audit_sequence: number | null;
@@ -206,6 +208,24 @@ export type Settings = {
     max_tokens: number;
     timeout_seconds: number;
   };
+  local_advisor: LocalAdvisorSettings;
+};
+
+export type LocalAdvisorSettings = {
+  enabled: boolean;
+  url: string;
+  model: string;
+  automatic: boolean;
+  timeout_seconds: number;
+  image_side: number;
+};
+
+export type LocalAdvisorStatus = {
+  enabled: boolean;
+  running: boolean;
+  model_installed: boolean;
+  models: string[];
+  problem: string | null;
 };
 
 export type PhoneView = {

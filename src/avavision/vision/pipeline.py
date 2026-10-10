@@ -157,8 +157,14 @@ def compartment_crop(
     rectified: Rectified, layout: PackLayout, index: CompartmentIndex, margin: float = 0.15
 ) -> np.ndarray:
     """One compartment of the perspective-corrected pack, with a margin of its neighbours for context."""
+    return crop_compartment(rectified.canvas, layout, index, margin)
+
+
+def crop_compartment(
+    canvas: np.ndarray, layout: PackLayout, index: CompartmentIndex, margin: float = 0.15
+) -> np.ndarray:
+    """:func:`compartment_crop` of a perspective-corrected pack image (a stored evidence photo, say)."""
     rect = layout.cell_rect(index)
-    canvas = rectified.canvas
     h, w = canvas.shape[:2]
     dx, dy = rect.width * margin, rect.height * margin
     x0, y0 = max(0, int((rect.x - dx) * w)), max(0, int((rect.y - dy) * h))

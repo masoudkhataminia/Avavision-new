@@ -30,7 +30,7 @@ from ..storage.database import AuditChainBroken
 from ..vision.pack_finder import marker_sheet
 from .credentials import save_api_key
 from .demo import DemoFault
-from .service import Station, StationError
+from .service import Advisor, Station, StationError
 
 _FILE = re.compile(r"^[0-9a-f-]{8,64}\.jpg$")
 
@@ -41,6 +41,7 @@ class StartCheck(BaseModel):
 
 class ReviewRequest(BaseModel):
     compartments: list[CompartmentIndex] | None = None
+    advisor: Advisor = Advisor.CLAUDE
 
 
 class FaultRequest(BaseModel):
@@ -318,7 +319,17 @@ def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | 
 
     @app.post("/api/check/review")
     def review(request: ReviewRequest):
-        return station.review(request.compartments)
+        return station.review(request.compartments, request.advisor)
+
+    @app.post("/api/check/review/stop")
+    def stop_review():
+        return station.stop_review()
+
+    @app.get("/api/advisor/local")
+    def local_advisor_status():
+        if station.local is None:
+            return {"enabled": False, "running": False, "model_installed": False, "models": [], "problem": None}
+        return {"enabled": True, **station.local.status().model_dump()}
 
     @app.post("/api/check/explain")
     def explain():

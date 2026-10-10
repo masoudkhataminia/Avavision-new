@@ -241,22 +241,12 @@ class ClaudeExpert:
         profile: PackProfile,
         catalog: Catalog,
     ) -> ExpertAnswer[AdvisoryOpinion]:
-        expectation = profile.expectation(index)
-        items = expectation.items if expectation else []
-        lines = []
-        for item in items:
-            medication = catalog.get(item.medication_id)
-            name = medication.display_name if medication else item.medication_id
-            looks = medication.appearance if medication else None
-            described = ", ".join(v for v in (looks.colour, looks.shape, looks.imprint) if v) if looks else ""
-            lines.append(f"- {item.quantity} × {name}" + (f" ({described})" if described else ""))
-        expected = "\n".join(lines) if lines else "Nothing: the compartment should be empty."
+        question, total = review_question(index, layout, profile, catalog)
         content = [
             _image_block(encode_jpeg(image, max_side=1024), "image/jpeg"),
-            {"type": "text", "text": f"Compartment: {layout.label(index)}\nExpected:\n{expected}"},
+            {"type": "text", "text": question},
         ]
         answer = self._ask(REVIEW_SYSTEM, content, CompartmentReading, self.settings.review_effort)
-        total = sum(i.quantity for i in items)
         return ExpertAnswer(value=opinion_from_reading(answer.value, index, total, answer.call), call=answer.call)
 
     # ------------------------------------------------------------------ transport
@@ -306,6 +296,23 @@ class ClaudeExpert:
             request_id=getattr(response, "_request_id", None),
         )
         return ExpertAnswer(value=parsed, call=call)
+
+
+def review_question(
+    index: CompartmentIndex, layout: PackLayout, profile: PackProfile, catalog: Catalog
+) -> tuple[str, int]:
+    """The text that goes with a compartment image to a reviewing model, and the expected number of doses."""
+    expectation = profile.expectation(index)
+    items = expectation.items if expectation else []
+    lines = []
+    for item in items:
+        medication = catalog.get(item.medication_id)
+        name = medication.display_name if medication else item.medication_id
+        looks = medication.appearance if medication else None
+        described = ", ".join(v for v in (looks.colour, looks.shape, looks.imprint) if v) if looks else ""
+        lines.append(f"- {item.quantity} × {name}" + (f" ({described})" if described else ""))
+    expected = "\n".join(lines) if lines else "Nothing: the compartment should be empty."
+    return f"Compartment: {layout.label(index)}\nExpected:\n{expected}", sum(i.quantity for i in items)
 
 
 def opinion_from_reading(

@@ -12,19 +12,18 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
 import cv2
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .. import __version__
 from ..brain.brain import Brain, LearningSummary
 from ..brain.learning import PillSighting, plan_learning
-from ..core.advisory import AdvisoryOpinion
 from ..core.audit import CheckRecord, ModelSummary
 from ..core.engine import BrainContext, CompartmentStatus, DecisionPolicy, VerificationEngine
 from ..core.gate import (
@@ -42,8 +41,9 @@ from ..core.physical import PhysicalFeatures, PhysicalRange
 from ..core.session import CheckSession, Phase
 from ..core.signoff import SignOff
 from ..expert.charts import MedicationChart, ProfileDraft, chart_to_profile
-from ..expert.claude import ClaudeExpert, ExpertCall, ExpertError, ExpertSettings, Explanation
+from ..expert.claude import ClaudeExpert, ExpertCall, ExpertError, ExpertSettings, ExpertUnavailable, Explanation
 from ..expert.describe import describe_finding, describe_pack_finding
+from ..expert.local import LocalAdvisorSettings, LocalVisionAdvisor
 from ..storage.database import Database
 from ..vision.camera import CameraSettings, CameraSource, FrameSource, LiveFeed
 from ..vision.codes import code_image, read_codes
@@ -88,6 +88,36 @@ class StationSettings(BaseModel):
     #: Language of the expert's explanations ("en" or "fa").
     language: str = "en"
     expert: ExpertSettings = Field(default_factory=ExpertSettings)
+    #: Second opinions from a vision-language model running offline (Qwen3-VL in Ollama), D-137.
+    local_advisor: LocalAdvisorSettings = Field(default_factory=LocalAdvisorSettings)
+
+
+class Advisor(StrEnum):
+    CLAUDE = "claude"
+    LOCAL = "local"
+
+
+@dataclass
+class ReviewProgress:
+    advisor: str
+    total: int
+    done: int = 0
+    stop: bool = False
+
+
+@dataclass
+class ReviewJob:
+    reviewer: ClaudeExpert | LocalVisionAdvisor
+    check: ActiveCheck
+    evidence: AnalyzedFrame
+    targets: list[CompartmentIndex]
+    images: dict[CompartmentIndex, np.ndarray]
+    workers: int
+    progress: ReviewProgress
+
+
+def local_advisor(settings: LocalAdvisorSettings) -> LocalVisionAdvisor | None:
+    return LocalVisionAdvisor(settings) if settings.enabled else None
 
 
 @dataclass
@@ -113,6 +143,7 @@ class ActiveCheck:
     explanation: Explanation | None = None
     expert_calls: list[ExpertCall] = field(default_factory=list)
     review_errors: list[str] = field(default_factory=list)
+    reviewing: ReviewProgress | None = None
     record: CheckRecord | None = None
     audit_sequence: int | None = None
     learning: LearningSummary | None = None
@@ -202,6 +233,7 @@ class Station:
         model_note: str | None = None,
         expert: ClaudeExpert | None = None,
         phone: PhoneLink | None = None,
+        local: LocalVisionAdvisor | None = None,
     ):
         self.db = db
         self.phone = phone
@@ -219,6 +251,7 @@ class Station:
             db.prune_crops(db.referenced_crops(self.brain))
         self.policy = DecisionPolicy()
         self.expert = expert
+        self.local = local
         self.feed = LiveFeed(source)
         self.camera_error = source.reason if isinstance(source, NoCamera) else None
         self.live: LiveStatus | None = None
@@ -290,6 +323,7 @@ class Station:
             model_note=model_note,
             expert=expert,
             phone=phone,
+            local=local_advisor(settings.local_advisor),
         )
 
     # ------------------------------------------------------------------ lifecycle
@@ -400,6 +434,11 @@ class Station:
                 "fallbacks": self.settings.expert.fallbacks,
                 "key": bool(load_api_key(self.db) or os.environ.get("ANTHROPIC_API_KEY")),
             },
+            "local_advisor": {
+                "enabled": self.local is not None,
+                "model": self.settings.local_advisor.model,
+                "automatic": self.settings.local_advisor.automatic,
+            },
             "audit": {
                 "entries": self.db.audit_count(),
                 "defect": self.audit_defect.model_dump() if self.audit_defect else None,
@@ -469,7 +508,10 @@ class Station:
             if self.check and self.check.session.phase != Phase.COMPLETED:
                 raise StationError("finish the current check first")
             merged = self.settings.model_dump() | changes
-            settings = StationSettings.model_validate(merged)
+            try:
+                settings = StationSettings.model_validate(merged)
+            except ValidationError as error:
+                raise StationError("; ".join(e["msg"] for e in error.errors())) from error
             if self.demo is not None:
                 settings.layout_id = self.settings.layout_id
             self.db.save_setting("station", settings.model_dump(mode="json"))
@@ -478,6 +520,9 @@ class Station:
             self.expert = (
                 ClaudeExpert(settings.expert, api_key=load_api_key(self.db)) if settings.expert_enabled else None
             )
+            if self.local is not None:
+                self.local.close()
+            self.local = local_advisor(settings.local_advisor)
             return settings
 
     def catalog(self) -> Catalog:
@@ -593,6 +638,10 @@ class Station:
                 name = f"{check.session.id}.jpg"
                 cv2.imwrite(str(self.db.evidence / name), evidence.rectified.canvas, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 check.evidence_file = name
+            if self.local is not None and self.settings.local_advisor.automatic and evidence is not None:
+                job = self._prepare_review(Advisor.LOCAL, None)
+                if job.targets:
+                    threading.Thread(target=self._background_review, args=(job,), daemon=True).start()
             return self.check_view()
 
     def retake(self) -> dict:
@@ -600,7 +649,7 @@ class Station:
             check = self._active(Phase.ANALYZED)
             check.session.retake()
             check.frames, check.evidence, check.explanation = [], None, None
-            check.timings, check.review_errors = {}, []
+            check.timings, check.review_errors, check.reviewing = {}, [], None
             return self.check_view()
 
     def evidence_jpeg(self) -> bytes:
@@ -668,45 +717,114 @@ class Station:
         view["profile_issues"] = [i.model_dump(mode="json") for i in draft.profile.issues(layout, self.catalog())]
         return view
 
-    def review(self, compartments: list[CompartmentIndex] | None = None) -> dict:
+    def review(self, compartments: list[CompartmentIndex] | None = None, advisor: Advisor = Advisor.CLAUDE) -> dict:
         """Second opinions, by default on every compartment the engine accepted. They can only escalate."""
-        expert = self._expert()
+        with self._lock:
+            job = self._prepare_review(advisor, compartments)
+        self._run_review(job)
+        with self._lock:
+            return self.check_view()
+
+    def stop_review(self) -> dict:
         with self._lock:
             check = self._active(Phase.ANALYZED)
-            if check.evidence is None or check.evidence.rectified is None:
-                raise StationError("no usable photo to review")
-            result = check.session.result
-            targets = compartments or [
-                v.compartment
-                for v in result.compartments
-                if v.status in (CompartmentStatus.VERIFIED, CompartmentStatus.COUNT_MATCHED)
-            ]
-            images = {i: compartment_crop(check.evidence.rectified, self.layout, i) for i in targets}
-            session_id = check.session.id
+            if check.reviewing is not None:
+                check.reviewing.stop = True
+            return self.check_view()
+
+    def _reviewer(self, advisor: Advisor) -> ClaudeExpert | LocalVisionAdvisor:
+        if advisor == Advisor.LOCAL:
+            if self.local is None:
+                raise StationError("the local model is turned off in settings")
+            return self.local
+        return self._expert()
+
+    def _prepare_review(self, advisor: Advisor, compartments: list[CompartmentIndex] | None) -> ReviewJob:
+        """Under the lock: what to review, and the review marked as running."""
+        reviewer = self._reviewer(advisor)
+        check = self._active(Phase.ANALYZED)
+        if check.evidence is None or check.evidence.rectified is None:
+            raise StationError("no usable photo to review")
+        if check.reviewing is not None:
+            raise StationError("a second opinion is already running")
+        result = check.session.result
+        targets = compartments or [
+            v.compartment
+            for v in result.compartments
+            if v.status in (CompartmentStatus.VERIFIED, CompartmentStatus.COUNT_MATCHED)
+        ]
+        images = {i: compartment_crop(check.evidence.rectified, self.layout, i) for i in targets}
+        check.review_errors = []
+        progress = ReviewProgress(advisor=reviewer.settings.model, total=len(targets))
+        if targets:
+            check.reviewing = progress
+        # A local model answers one request at a time; queued requests would only run into their timeouts.
+        workers = 1 if isinstance(reviewer, LocalVisionAdvisor) else 6
+        return ReviewJob(reviewer, check, check.evidence, targets, images, workers, progress)
+
+    def _current(self, job: ReviewJob) -> bool:
+        """Whether the reviewed photo is still the one being checked (no retake, cancel or sign-off since)."""
+        check = job.check
+        return self.check is check and check.evidence is job.evidence and check.session.phase == Phase.ANALYZED
+
+    def _run_review(self, job: ReviewJob) -> None:
+        """Asks for every opinion and applies each as it arrives, so a disagreement escalates at once."""
+        check, reviewer, progress = job.check, job.reviewer, job.progress
+        if not job.targets:
+            return
+        catalog = self.catalog()
 
         def ask(index: CompartmentIndex):
+            if progress.stop:
+                return None
             try:
-                return expert.review_compartment(images[index], index, self.layout, check.profile, self.catalog())
+                return reviewer.review_compartment(job.images[index], index, self.layout, check.profile, catalog)
             except ExpertError as error:
                 return error
 
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            answers = list(pool.map(ask, targets))
-        opinions: list[AdvisoryOpinion] = []
-        errors = []
-        with self._lock:
-            check = self._active(Phase.ANALYZED)
-            if check.session.id != session_id:
-                raise StationError("the check changed during the review")
-            for index, answer in zip(targets, answers, strict=True):
-                if isinstance(answer, ExpertError):
-                    errors.append(f"{self.layout.label(index)}: {answer}")
-                else:
-                    opinions.append(answer.value)
-                    check.expert_calls.append(answer.call)
-            check.review_errors = errors
-            check.session.advise(opinions)
-            return self.check_view()
+        stale = False
+        try:
+            if isinstance(reviewer, LocalVisionAdvisor):
+                state = reviewer.status()
+                if state.problem:
+                    raise StationError(f"local model: {state.problem}")
+            with ThreadPoolExecutor(max_workers=job.workers) as pool:
+                futures = {pool.submit(ask, index): index for index in job.targets}
+                for future in as_completed(futures):
+                    index, answer = futures[future], future.result()
+                    with self._lock:
+                        if not self._current(job):
+                            stale = True
+                        elif isinstance(answer, ExpertUnavailable):
+                            # Not running, no key, no connection: every other request would fail the same way.
+                            check.review_errors.append(str(answer))
+                            progress.stop = True
+                        elif isinstance(answer, ExpertError):
+                            check.review_errors.append(f"{self.layout.label(index)}: {answer}")
+                        elif answer is not None:
+                            check.session.advise([answer.value])
+                            check.expert_calls.append(answer.call)
+                        if stale or progress.stop:
+                            for other in futures:
+                                other.cancel()
+                        else:
+                            progress.done += 1
+                    if stale:
+                        break
+        finally:
+            with self._lock:
+                if check.reviewing is progress:
+                    check.reviewing = None
+        if stale:
+            raise StationError("the check changed during the review")
+
+    def _background_review(self, job: ReviewJob) -> None:
+        try:
+            self._run_review(job)
+        except (StationError, ExpertError) as error:
+            with self._lock:
+                if self._current(job):
+                    job.check.review_errors.append(str(error))
 
     def explain(self) -> dict:
         expert = self._expert()
@@ -907,6 +1025,7 @@ class Station:
             "explanation": check.explanation.model_dump() if check.explanation else None,
             "advisories": [o.model_dump(mode="json") for o in session.advisories],
             "review_errors": check.review_errors,
+            "reviewing": asdict(check.reviewing) if check.reviewing else None,
             "expert_calls": [c.model_dump() for c in check.expert_calls],
             "record_id": str(check.record.id) if check.record else None,
             "audit_sequence": check.audit_sequence,
