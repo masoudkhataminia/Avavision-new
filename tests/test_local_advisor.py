@@ -120,6 +120,14 @@ def test_local_model_problems_are_reported_not_hidden(pack):
     def refuse(request):
         raise httpx.ConnectError("connection refused", request=request)
 
+    def crashed(request):
+        return httpx.Response(500, json={"error": "llama-server process has terminated: exit status 0xe06d7363"})
+
+    with pytest.raises(ExpertUnavailable, match="driver"):
+        LocalVisionAdvisor(
+            LocalAdvisorSettings(enabled=True), transport=httpx.MockTransport(crashed)
+        ).review_compartment(image, cell(0, 0), layout, profile, catalog)
+
     def slow(request):
         raise httpx.ReadTimeout("timed out", request=request)
 

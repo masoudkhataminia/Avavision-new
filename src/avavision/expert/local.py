@@ -154,6 +154,12 @@ class LocalVisionAdvisor:
             raise ExpertUnavailable(f"the local model is not answering at {self.base}: is Ollama running?") from error
         if response.status_code == 404:
             raise ExpertUnavailable(f"the model is not installed: run  ollama pull {self.settings.model}")
+        if response.status_code >= 500 and "terminated" in response.text:
+            # Ollama's runner died while loading the model: on an NVIDIA card almost always a driver too old for CUDA.
+            raise ExpertUnavailable(
+                "the local model stopped while loading: update the graphics card driver (NVIDIA: Windows Update "
+                "optional updates or nvidia.com), or choose a smaller model"
+            )
         if response.status_code >= 400:
             raise ExpertUnavailable(f"the local model failed ({response.status_code}): {response.text[:200]}")
         try:
