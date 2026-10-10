@@ -41,6 +41,12 @@ class PhysicalPolicy(BaseModel):
     colour_margin: float = 10.0
     #: Robust spread (median absolute deviation) multiples added to the margins.
     spread_factor: float = 4.0
+    #: Measurements this far from the median (spread multiples, at least a fraction of the median) do not move the
+    #: range's edges: a broken tablet, two touching tablets or a mislabelled pill must not widen what passes as
+    #: this medication (D-138). They only make the range tighter, so they can only escalate.
+    outlier_factor: float = 6.0
+    outlier_floor_fraction: float = 0.15
+    outlier_floor_colour: float = 8.0
 
 
 class PhysicalRange(BaseModel):
@@ -75,10 +81,17 @@ def _mad(values: list[float]) -> float:
     return statistics.median(abs(v - centre) for v in values)
 
 
-def _interval(values: list[float], policy: PhysicalPolicy) -> tuple[float, float]:
+def _typical(values: list[float], limit: float) -> list[float]:
+    """The values within ``limit`` of the median (never empty)."""
     centre = statistics.median(values)
-    lo, hi = min(values), max(values)
-    margin = max(policy.size_margin_mm, policy.size_margin_fraction * centre) + policy.spread_factor * _mad(values)
+    return [v for v in values if abs(v - centre) <= limit] or [centre]
+
+
+def _interval(values: list[float], policy: PhysicalPolicy) -> tuple[float, float]:
+    centre, spread = statistics.median(values), _mad(values)
+    typical = _typical(values, max(policy.outlier_factor * spread, policy.outlier_floor_fraction * centre))
+    lo, hi = min(typical), max(typical)
+    margin = max(policy.size_margin_mm, policy.size_margin_fraction * centre) + policy.spread_factor * spread
     return (min(lo, centre) - margin, max(hi, centre) + margin)
 
 
@@ -95,7 +108,9 @@ def learn_ranges(
         features = [f for f, _ in rows]
         centre = tuple(statistics.median(getattr(f, k) for f in features) for k in ("lightness", "a", "b"))
         distances = [f.colour_distance(*centre) for f in features]
-        radius = max(distances) + policy.colour_margin + policy.spread_factor * _mad(distances)
+        spread = _mad(distances)
+        typical = _typical(distances, max(policy.outlier_factor * spread, policy.outlier_floor_colour))
+        radius = max(typical) + policy.colour_margin + policy.spread_factor * spread
         ranges[medication] = PhysicalRange(
             medication_id=medication,
             samples=len(rows),

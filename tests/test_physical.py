@@ -47,6 +47,19 @@ def test_ranges_need_enough_pills_from_enough_packs():
     assert ranges[METFORMIN].admits(WHITE_OVAL.model_copy(update={"length_mm": 12.0, "lightness": 85}))
 
 
+def test_broken_or_mislabelled_pills_do_not_widen_a_range():
+    good = samples(METFORMIN, WHITE_OVAL, per_pack=20)
+    # Fragments of tablets split by segmentation, and one orange tablet taught as metformin by mistake.
+    fragment = WHITE_OVAL.model_copy(update={"length_mm": 5.3, "width_mm": 5.1})
+    odd = [(fragment, f"{METFORMIN}-{k % 2}") for k in range(4)] + [(ORANGE_ROUND, f"{METFORMIN}-0")]
+    clean, noisy = learn_ranges({METFORMIN: good})[METFORMIN], learn_ranges({METFORMIN: good + odd})[METFORMIN]
+    assert noisy.length_mm[0] > 9.5 and noisy.length_mm == pytest.approx(clean.length_mm, abs=0.2)
+    assert noisy.colour_radius < clean.colour_radius + 2
+    white_round = WHITE_OVAL.model_copy(update={"length_mm": 6.8, "width_mm": 6.8})
+    assert not noisy.admits(white_round) and not noisy.admits(ORANGE_ROUND) and noisy.admits(WHITE_OVAL)
+    assert noisy.samples == len(good) + len(odd)
+
+
 def test_fits_none_only_when_every_expected_medication_is_known():
     ranges = learn_ranges({METFORMIN: samples(METFORMIN, WHITE_OVAL)})
     orange = physical_evidence(ORANGE_ROUND, ranges)
