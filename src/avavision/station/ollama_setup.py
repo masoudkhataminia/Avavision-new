@@ -108,8 +108,9 @@ class OllamaSetup:
                     raise SetupError("Ollama is not answering on that computer: install it there from ollama.com")
                 self._start_server(self._executable() or self._install())
             self._download()
-            self._report(SetupState(stage=SetupStage.DONE, detail=f"{self.model} is ready"))
+            # Turn the advisor on before saying so: the interface reloads the settings as soon as it sees "done".
             self.on_done()
+            self._report(SetupState(stage=SetupStage.DONE, detail=f"{self.model} is ready"))
         except SetupError as error:
             self._report(SetupState(stage=SetupStage.FAILED, error=str(error)))
         except (httpx.HTTPError, OSError, subprocess.SubprocessError) as error:
