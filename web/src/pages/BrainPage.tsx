@@ -173,7 +173,7 @@ export function BrainPage({ onChange }: { onChange: () => void }) {
           const chosen = Object.fromEntries(task.pills.map((p) => [p.id, labels[p.id] ?? p.suggestion ?? ""]));
           const ready = Object.values(chosen).every(Boolean);
           return (
-            <div key={task.id} className="stack" style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem" }}>
+            <div key={task.id} className="stack" style={{ borderTop: "1px solid var(--border)", paddingTop: "0.75rem" }}>
               <div className="small">
                 <b>{task.compartment}</b> · expected{" "}
                 {Object.entries(task.expected)
