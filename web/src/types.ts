@@ -226,6 +226,14 @@ export type LocalAdvisorStatus = {
   model_installed: boolean;
   models: string[];
   problem: string | null;
+  graphics_share: number | null;
+  setup: {
+    stage: "idle" | "installing" | "starting" | "downloading" | "done" | "failed";
+    detail: string;
+    completed: number;
+    total: number;
+    error: string | null;
+  } | null;
 };
 
 export type PhoneView = {

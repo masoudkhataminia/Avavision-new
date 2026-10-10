@@ -37,10 +37,14 @@ class FakeOllama:
         self.delay = delay
         self.requests: list[dict] = []
         self.lock = threading.Lock()
+        self.vram = 0
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/tags":
             return httpx.Response(200, json={"models": [{"name": m} for m in self.models]})
+        if request.url.path == "/api/ps":
+            loaded = [{"name": m, "size": 6_000_000_000, "size_vram": self.vram} for m in self.models[:1]]
+            return httpx.Response(200, json={"models": loaded if self.requests else []})
         body = json.loads(request.content)
         if body["model"] not in self.models:
             return httpx.Response(404, json={"error": f"model '{body['model']}' not found"})
@@ -155,7 +159,9 @@ def test_local_second_opinions_escalate_on_the_station(client):
     assert len(escalated) == 1 and escalated[0]["status"] == "needsReview"
     assert escalated[0]["advisory"]["source"] == f"{DEFAULT_MODEL} (local)"
     status = client.get("/api/advisor/local").json()
-    assert status["enabled"] and status["model_installed"]
+    assert status["enabled"] and status["model_installed"] and status["graphics_share"] == 0  # processor only
+    fake.vram = 6_000_000_000
+    assert client.get("/api/advisor/local").json()["graphics_share"] == 1
 
 
 def test_a_local_model_that_is_not_running_stops_the_review_at_once(client):

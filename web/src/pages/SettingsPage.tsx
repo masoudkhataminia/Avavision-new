@@ -9,7 +9,11 @@ const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 export function SettingsPage({ status, onChange }: { status: Status | null; onChange: () => void }) {
   const { data: loaded, reload } = useData<Settings>("/api/settings");
   const { data: layouts, reload: reloadLayouts } = useData<Layout[]>("/api/layouts");
-  const { data: local } = useData<LocalAdvisorStatus>("/api/advisor/local", 5000);
+  const [settingUp, setSettingUp] = useState(false);
+  const { data: local, reload: reloadLocal } = useData<LocalAdvisorStatus>(
+    "/api/advisor/local",
+    settingUp ? 1000 : 5000,
+  );
   const [settings, setSettings] = useState<Settings | null>(null);
   const [layout, setLayout] = useState<Layout | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -18,6 +22,16 @@ export function SettingsPage({ status, onChange }: { status: Status | null; onCh
   const { busy, error, run } = useAction();
 
   useEffect(() => setSettings(loaded), [loaded]);
+  // While the offline model is being set up, follow it closely; when it is done its setting is on.
+  const setupStage = local?.setup?.stage;
+  useEffect(() => {
+    const active = setupStage === "installing" || setupStage === "starting" || setupStage === "downloading";
+    setSettingUp(active);
+    if (setupStage === "done") {
+      reload();
+      onChange();
+    }
+  }, [setupStage, reload, onChange]);
   useEffect(() => {
     if (layouts && settings) setLayout(layouts.find((l) => l.id === settings.layout_id) ?? null);
   }, [layouts, settings?.layout_id]);
@@ -44,6 +58,13 @@ export function SettingsPage({ status, onChange }: { status: Status | null; onCh
       setApiKey("");
       setMessage(key ? `API key stored in the ${result.stored_in}.` : "API key removed.");
       onChange();
+    });
+
+  const setUpLocal = () =>
+    run("local", async () => {
+      await api.post("/api/advisor/local/setup");
+      setSettingUp(true);
+      reloadLocal();
     });
 
   const saveLayout = (calibrated: boolean) =>
@@ -220,9 +241,13 @@ export function SettingsPage({ status, onChange }: { status: Status | null; onCh
             />
             Ask it about every accepted compartment right after capture (needs a graphics card)
           </label>
-          {local?.enabled && (
-            <div className={local.problem ? "error small" : "notice small"}>
-              {local.problem ?? `Ollama is running and ${settings.local_advisor.model} is installed.`}
+          {local && <LocalModelState local={local} model={settings.local_advisor.model} />}
+          {local && !settingUp && (!local.running || !local.model_installed) && (
+            <div className="row">
+              <button disabled={busy !== null} onClick={setUpLocal}>
+                Install and set up automatically
+              </button>
+              <span className="small muted">Installs Ollama if needed and downloads the model (about 6 GB).</span>
             </div>
           )}
           <div className="row">
@@ -277,4 +302,47 @@ export function SettingsPage({ status, onChange }: { status: Status | null; onCh
       </div>
     </div>
   );
+}
+
+const STAGE_TEXT: Record<string, string> = {
+  installing: "Installing Ollama",
+  starting: "Starting Ollama",
+  downloading: "Downloading the model",
+};
+
+function LocalModelState({ local, model }: { local: LocalAdvisorStatus; model: string }) {
+  const setup = local.setup;
+  if (setup && STAGE_TEXT[setup.stage]) {
+    const share = setup.total ? setup.completed / setup.total : 0;
+    return (
+      <div className="notice small stack" style={{ gap: 6 }}>
+        <span>
+          {STAGE_TEXT[setup.stage]}
+          {setup.total > 0 &&
+            ` · ${(setup.completed / 1e9).toFixed(1)} of ${(setup.total / 1e9).toFixed(1)} GB (${Math.round(share * 100)}%)`}
+        </span>
+        <div className="meter">
+          <span style={{ width: `${Math.round(share * 100)}%`, background: "var(--accent)" }} />
+        </div>
+      </div>
+    );
+  }
+  if (setup?.stage === "failed") return <div className="error small">{setup.error}</div>;
+  if (local.running && local.model_installed) {
+    const where =
+      local.graphics_share === null
+        ? ""
+        : local.graphics_share >= 0.9
+          ? " It runs on the graphics card."
+          : local.graphics_share > 0
+            ? ` Only ${Math.round(local.graphics_share * 100)}% fits on the graphics card: answers will be slow.`
+            : " It runs on the processor only: answers take a minute or more.";
+    return (
+      <div className="notice small">
+        Ollama is running and {model} is installed.{where}
+        {!local.enabled && " Turn it on above and save."}
+      </div>
+    );
+  }
+  return <div className="error small">{local.problem ?? "The offline model is not ready."}</div>;
 }

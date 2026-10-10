@@ -56,6 +56,7 @@ from ..vision.runtime import available_providers, file_sha256
 from ..vision.segmentation import rectify
 from .credentials import load_api_key
 from .demo import DemoCamera, DemoFault, demo_catalog, demo_profile
+from .ollama_setup import OllamaSetup, System
 from .phone import PhoneCamera, PhoneLink, new_pairing_key
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
@@ -252,6 +253,10 @@ class Station:
         self.policy = DecisionPolicy()
         self.expert = expert
         self.local = local
+        self.ollama_setup: OllamaSetup | None = None
+        #: How the station reaches Ollama and the computer when setting it up (replaced in tests).
+        self.ollama_transport = None
+        self.ollama_system: System | None = None
         self.feed = LiveFeed(source)
         self.camera_error = source.reason if isinstance(source, NoCamera) else None
         self.live: LiveStatus | None = None
@@ -724,6 +729,41 @@ class Station:
         self._run_review(job)
         with self._lock:
             return self.check_view()
+
+    def local_model_view(self) -> dict:
+        """Whether the offline model is enabled, running, installed and on the graphics card, and any setup."""
+        probe = self.local or LocalVisionAdvisor(self.settings.local_advisor, transport=self.ollama_transport)
+        try:
+            state = probe.status().model_dump()
+        finally:
+            if probe is not self.local:
+                probe.close()
+        setup = self.ollama_setup.state.view() if self.ollama_setup else None
+        return {"enabled": self.local is not None, **state, "setup": setup}
+
+    def setup_local_model(self) -> dict:
+        """Installs Ollama if needed, downloads the model and turns the offline advisor on, in the background."""
+        with self._lock:
+            if self.ollama_setup is None or not self.ollama_setup.running:
+                settings = self.settings.local_advisor
+                self.ollama_setup = OllamaSetup(
+                    settings.url,
+                    settings.model,
+                    on_done=self._enable_local_advisor,
+                    transport=self.ollama_transport,
+                    system=self.ollama_system,
+                )
+                self.ollama_setup.start()
+        return self.local_model_view()
+
+    def _enable_local_advisor(self) -> None:
+        # Only this one setting changes, so it is safe even in the middle of a check.
+        with self._lock:
+            enabled = self.settings.local_advisor.model_copy(update={"enabled": True})
+            self.settings = self.settings.model_copy(update={"local_advisor": enabled})
+            self.db.save_setting("station", self.settings.model_dump(mode="json"))
+            if self.local is None:
+                self.local = LocalVisionAdvisor(enabled, transport=self.ollama_transport)
 
     def stop_review(self) -> dict:
         with self._lock:

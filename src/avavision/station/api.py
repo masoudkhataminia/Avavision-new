@@ -327,9 +327,11 @@ def create_app(station: Station, start: bool = True, allowed_hosts: list[str] | 
 
     @app.get("/api/advisor/local")
     def local_advisor_status():
-        if station.local is None:
-            return {"enabled": False, "running": False, "model_installed": False, "models": [], "problem": None}
-        return {"enabled": True, **station.local.status().model_dump()}
+        return station.local_model_view()
+
+    @app.post("/api/advisor/local/setup")
+    def setup_local_advisor():
+        return station.setup_local_model()
 
     @app.post("/api/check/explain")
     def explain():

@@ -61,9 +61,9 @@ Surface برای **رابط کاربری** و تست اولیه مناسب اس�
 
 Qwen3-VL یک مدل بینایی است که روی خود کامپیوتر ایستگاه اجرا می‌شود (D-137). بعد از نصب، اینترنت لازم ندارد و عکس‌ها از کامپیوتر بیرون نمی‌روند. مثل Claude فقط نظر دوم می‌دهد: اگر با خانه‌ای مخالف باشد، آن خانه به بررسی داروساز می‌رود. هیچ خانه‌ای را قبول نمی‌کند.
 
-۱. Ollama را از ollama.com برای Windows نصب کنید (رایگان، مجوز MIT).
-۲. در Command Prompt یک بار بزنید: `ollama pull qwen3-vl:8b-instruct` (حدود ۶ گیگابایت).
-۳. در ایستگاه: Settings ← Offline model ← **Use the offline model** ← Save. پیام سبز «Ollama is running» یعنی آماده است.
+۱. در ایستگاه: Settings ← Offline model ← **Install and set up automatically**. برنامه خودش Ollama را نصب می‌کند (با winget، رایگان، مجوز MIT)، مدل را دانلود می‌کند (حدود ۶ گیگابایت، با نوار پیشرفت) و این گزینه را روشن می‌کند.
+۲. بعد از آن، پیام سبز «Ollama is running» یعنی آماده است. همان پیام می‌گوید مدل روی کارت گرافیک اجرا می‌شود یا فقط روی پردازنده.
+۳. اگر دکمه کار نکرد، دستی: Ollama را از ollama.com نصب کنید، در Command Prompt بزنید `ollama pull qwen3-vl:8b-instruct` و در Settings گزینه‌ی **Use the offline model** را روشن کنید.
 ۴. در صفحه‌ی بررسی، بعد از عکس، **Offline opinion** بزنید. اگر کارت گرافیک دارید، گزینه‌ی **Ask it about every accepted compartment right after capture** را هم روشن کنید تا خودکار انجام شود.
 
 | کامپیوتر | زمان هر خانه (تقریبی) |

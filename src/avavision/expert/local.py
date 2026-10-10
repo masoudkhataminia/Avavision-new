@@ -76,6 +76,8 @@ class LocalStatus(BaseModel):
     model_installed: bool
     models: list[str] = []
     problem: str | None = None
+    #: Share of the loaded model in graphics-card memory (0 = processor only); ``None`` until it has been loaded.
+    graphics_share: float | None = None
 
 
 class LocalVisionAdvisor:
@@ -99,7 +101,25 @@ class LocalVisionAdvisor:
         wanted = self.settings.model if ":" in self.settings.model else f"{self.settings.model}:latest"
         installed = wanted in models
         problem = None if installed else f"the model is not installed: run  ollama pull {self.settings.model}"
-        return LocalStatus(running=True, model_installed=installed, models=models, problem=problem)
+        return LocalStatus(
+            running=True,
+            model_installed=installed,
+            models=models,
+            problem=problem,
+            graphics_share=self._graphics_share(wanted),
+        )
+
+    def _graphics_share(self, model: str) -> float | None:
+        """How much of the loaded model sits in graphics-card memory, from Ollama's list of running models."""
+        try:
+            response = self._client.get(f"{self.base}/api/ps", timeout=3.0)
+            response.raise_for_status()
+            loaded = [m for m in response.json().get("models", []) if m.get("name") == model and m.get("size")]
+        except (httpx.HTTPError, ValueError):
+            return None
+        if not loaded:
+            return None
+        return round(max(min(1.0, (m.get("size_vram") or 0) / m["size"]) for m in loaded), 2)
 
     def review_compartment(
         self,
